@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import { 
   Plus,
   Trash2,
@@ -8,12 +9,16 @@ import {
   RefreshCw,
   Loader2,
   CheckCircle2,
-  ExternalLink
+  ExternalLink,
+  QrCode,
+  Smartphone,
+  AlertCircle
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Accordion,
   AccordionContent,
@@ -28,21 +33,59 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
+import { api, ApiError } from '@/lib/api';
+import type { WhatsAppInstance } from '@/lib/apiTypes';
 
-// Mock WhatsApp instances
-const mockWhatsAppInstances = [
-  { id: '1', name: 'SIXBLADES-LO2', status: 'disconnected', phone: null },
-  { id: '2', name: 'SIXBLADES-LO', status: 'connected', phone: '556194439915' },
-];
+// ============================================================================
+// TIPOS
+// ============================================================================
+
+interface InstancesResponse {
+  instances: WhatsAppInstance[];
+  meta?: {
+    total: number;
+  };
+}
+
+interface QRCodeResponse {
+  qrCode: string;
+  expiresAt: string;
+}
+
+// ============================================================================
+// COMPONENTE PRINCIPAL
+// ============================================================================
 
 export function TenantGeneralConfigTab() {
+  const { id: tenantId } = useParams();
+  
+  // WhatsApp instances state
+  const [instances, setInstances] = useState<WhatsAppInstance[]>([]);
+  const [isLoadingInstances, setIsLoadingInstances] = useState(true);
+  
   // WhatsApp modal states
   const [showCreateInstanceModal, setShowCreateInstanceModal] = useState(false);
   const [showQRCodeModal, setShowQRCodeModal] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [selectedInstance, setSelectedInstance] = useState<WhatsAppInstance | null>(null);
   const [newInstanceName, setNewInstanceName] = useState('');
-  const [newInstanceKey, setNewInstanceKey] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [qrCodeExpiry, setQrCodeExpiry] = useState<string | null>(null);
 
   // MCP modal states
   const [showMcpModal, setShowMcpModal] = useState(false);
@@ -60,6 +103,157 @@ export function TenantGeneralConfigTab() {
   const [ragChunkOverlap, setRagChunkOverlap] = useState('200');
   const [ragTopK, setRagTopK] = useState('3');
 
+  // ============================================================================
+  // CARREGAR INSTÂNCIAS
+  // ============================================================================
+
+  const loadInstances = async () => {
+    try {
+      setIsLoadingInstances(true);
+      const params: Record<string, any> = { limit: 100 };
+      if (tenantId) params.tenantId = tenantId;
+      
+      const response = await api.get<InstancesResponse>('/api/whatsapp/instances', params);
+      
+      if (response.success && response.data) {
+        setInstances(response.data.instances);
+      }
+    } catch (error) {
+      const apiError = error as ApiError;
+      console.error('Erro ao carregar instâncias:', apiError.message);
+      toast.error('Erro ao carregar instâncias WhatsApp');
+    } finally {
+      setIsLoadingInstances(false);
+    }
+  };
+
+  useEffect(() => {
+    loadInstances();
+  }, [tenantId]);
+
+  // ============================================================================
+  // HANDLERS WHATSAPP
+  // ============================================================================
+
+  const handleCreateInstance = async () => {
+    if (!newInstanceName.trim()) {
+      toast.error('Digite o nome da instância');
+      return;
+    }
+
+    setIsCreating(true);
+    
+    try {
+      const payload: Record<string, any> = {
+        name: newInstanceName.trim(),
+      };
+      
+      if (tenantId) {
+        payload.tenantId = tenantId;
+      }
+      
+      const response = await api.post<{ instance: WhatsAppInstance }>('/api/whatsapp/instances', payload);
+      
+      if (response.success && response.data) {
+        toast.success('Instância criada! Agora conecte escaneando o QR Code.');
+        setShowCreateInstanceModal(false);
+        setNewInstanceName('');
+        setSelectedInstance(response.data.instance);
+        
+        // Recarregar lista e abrir modal de QR Code
+        await loadInstances();
+        handleConnectInstance(response.data.instance);
+      }
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao criar instância');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleConnectInstance = async (instance: WhatsAppInstance) => {
+    setSelectedInstance(instance);
+    setIsConnecting(true);
+    setQrCode(null);
+    setShowQRCodeModal(true);
+    
+    try {
+      const response = await api.post<QRCodeResponse>(`/api/whatsapp/instances/${instance.id}/connect`);
+      
+      if (response.success && response.data) {
+        setQrCode(response.data.qrCode);
+        setQrCodeExpiry(response.data.expiresAt);
+      }
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao gerar QR Code');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleRefreshQRCode = async () => {
+    if (!selectedInstance) return;
+    
+    setIsConnecting(true);
+    setQrCode(null);
+    
+    try {
+      const response = await api.post<QRCodeResponse>(`/api/whatsapp/instances/${selectedInstance.id}/connect`);
+      
+      if (response.success && response.data) {
+        setQrCode(response.data.qrCode);
+        setQrCodeExpiry(response.data.expiresAt);
+        toast.success('QR Code atualizado!');
+      }
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao atualizar QR Code');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleDisconnectInstance = async (instance: WhatsAppInstance) => {
+    try {
+      await api.post(`/api/whatsapp/instances/${instance.id}/disconnect`);
+      toast.success('Instância desconectada!');
+      await loadInstances();
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao desconectar instância');
+    }
+  };
+
+  const handleOpenDeleteDialog = (instance: WhatsAppInstance) => {
+    setSelectedInstance(instance);
+    setShowDeleteDialog(true);
+  };
+
+  const handleDeleteInstance = async () => {
+    if (!selectedInstance) return;
+    
+    setIsDeleting(true);
+    
+    try {
+      await api.delete(`/api/whatsapp/instances/${selectedInstance.id}`);
+      toast.success('Instância removida com sucesso!');
+      setShowDeleteDialog(false);
+      setSelectedInstance(null);
+      await loadInstances();
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao remover instância');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // ============================================================================
+  // RENDER
+  // ============================================================================
+
   return (
     <div className="space-y-6">
       <Accordion type="multiple" defaultValue={['whatsapp', 'integracoes', 'google-calendar']} className="space-y-4">
@@ -68,7 +262,11 @@ export function TenantGeneralConfigTab() {
         <AccordionItem value="whatsapp" className="bg-cs-bg-card border border-border rounded-xl overflow-hidden">
           <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-cs-bg-card-hover">
             <div className="flex items-center gap-2">
+              <Smartphone className="w-5 h-5 text-cs-success" />
               <span className="font-semibold text-cs-text-primary">Instâncias WhatsApp</span>
+              {!isLoadingInstances && (
+                <span className="text-sm text-cs-text-muted">({instances.length})</span>
+              )}
             </div>
           </AccordionTrigger>
           <AccordionContent className="px-4 pb-4">
@@ -76,49 +274,85 @@ export function TenantGeneralConfigTab() {
               Instâncias Evolution API conectadas a este tenant
             </p>
 
-            {/* WhatsApp Instances List */}
-            <div className="space-y-3 mb-4">
-              {mockWhatsAppInstances.map((instance) => (
-                <div key={instance.id} className="bg-cs-bg-primary border border-border rounded-lg p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="font-medium text-cs-text-primary">{instance.name}</h4>
-                      <p className="text-sm text-cs-text-secondary">
-                        Status: {' '}
-                        <span className={instance.status === 'connected' ? 'text-cs-success' : 'text-cs-error'}>
-                          {instance.status === 'connected' ? 'Conectado' : 'Desconectado'}
-                        </span>
-                      </p>
-                      {instance.phone && (
-                        <p className="text-sm text-cs-text-muted">{instance.phone}</p>
-                      )}
+            {/* Loading State */}
+            {isLoadingInstances ? (
+              <div className="space-y-3 mb-4">
+                {[1, 2].map((i) => (
+                  <div key={i} className="bg-cs-bg-primary border border-border rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-2">
+                        <Skeleton className="h-5 w-32" />
+                        <Skeleton className="h-4 w-24" />
+                      </div>
+                      <div className="flex gap-2">
+                        <Skeleton className="h-9 w-28" />
+                        <Skeleton className="h-9 w-24" />
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {instance.status === 'connected' ? (
-                        <Button variant="outline" size="sm" className="border-border text-cs-text-secondary">
-                          <Power className="w-4 h-4 mr-2" />
-                          Desconectar
-                        </Button>
-                      ) : (
+                  </div>
+                ))}
+              </div>
+            ) : instances.length === 0 ? (
+              <div className="bg-cs-bg-primary border border-border rounded-lg p-8 text-center mb-4">
+                <Smartphone className="w-12 h-12 text-cs-text-muted mx-auto mb-3" />
+                <p className="text-cs-text-secondary font-medium">Nenhuma instância WhatsApp</p>
+                <p className="text-sm text-cs-text-muted">Adicione uma instância para conectar seu número</p>
+              </div>
+            ) : (
+              <div className="space-y-3 mb-4">
+                {instances.map((instance) => (
+                  <div key={instance.id} className="bg-cs-bg-primary border border-border rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium text-cs-text-primary">{instance.name}</h4>
+                        <p className="text-sm text-cs-text-secondary">
+                          Status: {' '}
+                          <span className={instance.status === 'connected' ? 'text-cs-success' : 'text-cs-error'}>
+                            {instance.status === 'connected' ? 'Conectado' : 
+                             instance.status === 'connecting' ? 'Conectando...' : 'Desconectado'}
+                          </span>
+                        </p>
+                        {instance.phoneNumber && (
+                          <p className="text-sm text-cs-text-muted">{instance.phoneNumber}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {instance.status === 'connected' ? (
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="border-border text-cs-text-secondary"
+                            onClick={() => handleDisconnectInstance(instance)}
+                          >
+                            <Power className="w-4 h-4 mr-2" />
+                            Desconectar
+                          </Button>
+                        ) : (
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="border-primary text-primary hover:bg-primary/10"
+                            onClick={() => handleConnectInstance(instance)}
+                          >
+                            <QrCode className="w-4 h-4 mr-2" />
+                            Conectar
+                          </Button>
+                        )}
                         <Button 
                           variant="outline" 
                           size="sm" 
-                          className="border-primary text-primary hover:bg-primary/10"
-                          onClick={() => setShowQRCodeModal(true)}
+                          className="border-destructive text-destructive hover:bg-destructive/10"
+                          onClick={() => handleOpenDeleteDialog(instance)}
                         >
-                          <Power className="w-4 h-4 mr-2" />
-                          Conectar
+                          <Trash2 className="w-4 h-4 mr-2" />
+                          Remover
                         </Button>
-                      )}
-                      <Button variant="outline" size="sm" className="border-destructive text-destructive hover:bg-destructive/10">
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        Remover
-                      </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
 
             <Button 
               className="w-full bg-cs-bg-primary border border-primary text-primary hover:bg-primary/10"
@@ -258,36 +492,39 @@ export function TenantGeneralConfigTab() {
           
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Nome da Instância</Label>
+              <Label>Nome da Instância *</Label>
               <Input
                 value={newInstanceName}
                 onChange={(e) => setNewInstanceName(e.target.value)}
                 placeholder="meu-whatsapp"
                 className="bg-background"
               />
-            </div>
-            
-            <div className="space-y-2">
-              <Label>Chave da Instância</Label>
-              <Input
-                value={newInstanceKey}
-                onChange={(e) => setNewInstanceKey(e.target.value)}
-                placeholder="chave-unica-123"
-                className="bg-background"
-              />
+              <p className="text-xs text-muted-foreground">
+                Use um nome único para identificar esta instância
+              </p>
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCreateInstanceModal(false)}>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowCreateInstanceModal(false)}
+              disabled={isCreating}
+            >
               Cancelar
             </Button>
-            <Button onClick={() => {
-              toast.success('Instância criada! Escaneie o QR Code para conectar.');
-              setShowCreateInstanceModal(false);
-              setShowQRCodeModal(true);
-            }}>
-              Criar
+            <Button 
+              onClick={handleCreateInstance}
+              disabled={isCreating || !newInstanceName.trim()}
+            >
+              {isCreating ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Criando...
+                </>
+              ) : (
+                'Criar'
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -300,27 +537,94 @@ export function TenantGeneralConfigTab() {
             <DialogTitle>Escanear QR Code</DialogTitle>
             <DialogDescription>
               Abra o WhatsApp no seu celular e escaneie este QR Code para conectar
+              {selectedInstance && (
+                <span className="block mt-1 font-medium text-foreground">
+                  Instância: {selectedInstance.name}
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
           
           <div className="flex flex-col items-center justify-center py-8">
-            <div className="w-48 h-48 bg-muted rounded-lg flex flex-col items-center justify-center border border-border">
-              <Loader2 className="w-12 h-12 text-muted-foreground animate-spin" />
-              <p className="text-sm text-muted-foreground mt-3">Gerando QR Code...</p>
-            </div>
+            {isConnecting ? (
+              <div className="w-64 h-64 bg-muted rounded-lg flex flex-col items-center justify-center border border-border">
+                <Loader2 className="w-12 h-12 text-muted-foreground animate-spin" />
+                <p className="text-sm text-muted-foreground mt-3">Gerando QR Code...</p>
+              </div>
+            ) : qrCode ? (
+              <div className="space-y-4">
+                <div className="w-64 h-64 bg-white rounded-lg flex items-center justify-center p-4">
+                  <img 
+                    src={qrCode} 
+                    alt="QR Code WhatsApp" 
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+                {qrCodeExpiry && (
+                  <p className="text-xs text-center text-muted-foreground">
+                    Expira em: {new Date(qrCodeExpiry).toLocaleTimeString('pt-BR')}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="w-64 h-64 bg-muted rounded-lg flex flex-col items-center justify-center border border-border">
+                <AlertCircle className="w-12 h-12 text-destructive" />
+                <p className="text-sm text-muted-foreground mt-3">Erro ao gerar QR Code</p>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="mt-4"
+                  onClick={handleRefreshQRCode}
+                >
+                  Tentar novamente
+                </Button>
+              </div>
+            )}
           </div>
 
           <DialogFooter>
-            <Button variant="outline">
-              <RefreshCw className="w-4 h-4 mr-2" />
+            <Button 
+              variant="outline" 
+              onClick={handleRefreshQRCode}
+              disabled={isConnecting}
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${isConnecting ? 'animate-spin' : ''}`} />
               Atualizar
             </Button>
-            <Button variant="outline" onClick={() => setShowQRCodeModal(false)}>
+            <Button variant="outline" onClick={() => {
+              setShowQRCodeModal(false);
+              setQrCode(null);
+              setSelectedInstance(null);
+              loadInstances(); // Recarregar para ver se conectou
+            }}>
               Fechar
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent className="bg-card border-border">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover Instância</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja remover a instância "{selectedInstance?.name}"? 
+              Esta ação não pode ser desfeita e a conexão com o WhatsApp será perdida.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteInstance}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? 'Removendo...' : 'Remover'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* MCP Modal */}
       <Dialog open={showMcpModal} onOpenChange={setShowMcpModal}>
@@ -431,6 +735,7 @@ export function TenantGeneralConfigTab() {
                 <Input
                   value={ragChunkSize}
                   onChange={(e) => setRagChunkSize(e.target.value)}
+                  placeholder="1000"
                   className="bg-background"
                 />
               </div>
@@ -439,6 +744,7 @@ export function TenantGeneralConfigTab() {
                 <Input
                   value={ragChunkOverlap}
                   onChange={(e) => setRagChunkOverlap(e.target.value)}
+                  placeholder="200"
                   className="bg-background"
                 />
               </div>
@@ -447,6 +753,7 @@ export function TenantGeneralConfigTab() {
                 <Input
                   value={ragTopK}
                   onChange={(e) => setRagTopK(e.target.value)}
+                  placeholder="3"
                   className="bg-background"
                 />
               </div>
