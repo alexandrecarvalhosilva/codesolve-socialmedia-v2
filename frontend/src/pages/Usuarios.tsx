@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Plus, Search, MoreHorizontal, Edit, Trash2, Power, PowerOff } from 'lucide-react';
+import { Users, Plus, Search, MoreHorizontal, Edit, Trash2, Power, PowerOff, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { DashboardLayout } from '@/layouts/DashboardLayout';
 import { Header } from '@/components/dashboard/Header';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,8 @@ import { EmptyState, EmptySearchState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { PermissionGate } from '@/components/ProtectedRoute';
-import { useAudit } from '@/contexts/AuditContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { api, ApiError } from '@/lib/api';
 import {
   Table,
   TableBody,
@@ -51,61 +52,192 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import type { User, UserRole, Tenant } from '@/lib/apiTypes';
 
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  status: 'active' | 'inactive' | 'pending';
-  lastLogin: string;
+// ============================================================================
+// TIPOS
+// ============================================================================
+
+interface UsersResponse {
+  users: User[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
-const initialUsers: User[] = [
-  { id: '1', name: 'João Silva', email: 'joao@example.com', role: 'Admin', status: 'active', lastLogin: '19/01/2026' },
-  { id: '2', name: 'Maria Santos', email: 'maria@example.com', role: 'Operador', status: 'active', lastLogin: '19/01/2026' },
-  { id: '3', name: 'Pedro Costa', email: 'pedro@example.com', role: 'Operador', status: 'inactive', lastLogin: '15/01/2026' },
-  { id: '4', name: 'Ana Lima', email: 'ana@example.com', role: 'Visualizador', status: 'active', lastLogin: '18/01/2026' },
-  { id: '5', name: 'Carlos Souza', email: 'carlos@example.com', role: 'Operador', status: 'pending', lastLogin: '-' },
-];
+interface TenantsResponse {
+  tenants: Tenant[];
+}
+
+// ============================================================================
+// FUNÇÕES AUXILIARES
+// ============================================================================
+
+const getRoleLabel = (role: UserRole): string => {
+  const labels: Record<UserRole, string> = {
+    superadmin: 'Super Admin',
+    admin: 'Admin',
+    operador: 'Operador',
+    visualizador: 'Visualizador',
+  };
+  return labels[role] || role;
+};
+
+const getStatusProps = (isActive: boolean) => {
+  return isActive 
+    ? { status: 'success' as const, label: 'Ativo' }
+    : { status: 'error' as const, label: 'Inativo' };
+};
+
+const formatDate = (dateString: string | null) => {
+  if (!dateString) return '-';
+  return new Date(dateString).toLocaleDateString('pt-BR');
+};
+
+// ============================================================================
+// COMPONENTE PRINCIPAL
+// ============================================================================
 
 export default function Usuarios() {
-  const { logActionBlocked } = useAudit();
-  const [users, setUsers] = useState<User[]>(initialUsers);
+  const { user: currentUser } = useAuth();
+  
+  // Estados de dados
+  const [users, setUsers] = useState<User[]>([]);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  
+  // Estados de UI
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Modal states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   // Form state
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    role: 'Operador',
+    password: '',
+    role: 'operador' as UserRole,
+    tenantId: '',
   });
-  
+
+  // ============================================================================
+  // CARREGAR DADOS
+  // ============================================================================
+
+  const loadUsers = async (page = 1, search = '') => {
+    try {
+      const params: Record<string, any> = {
+        page,
+        limit: 10,
+      };
+      
+      if (search) params.search = search;
+      
+      // Se não for superadmin, filtra pelo tenant do usuário
+      if (currentUser?.role !== 'superadmin' && currentUser?.tenantId) {
+        params.tenantId = currentUser.tenantId;
+      }
+      
+      const response = await api.get<UsersResponse>('/api/users', params);
+      
+      if (response.success && response.data) {
+        setUsers(response.data.users);
+        setTotalPages(response.data.meta.totalPages);
+        setTotalItems(response.data.meta.total);
+      }
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao carregar usuários');
+    }
+  };
+
+  const loadTenants = async () => {
+    try {
+      const response = await api.get<TenantsResponse>('/api/tenants', { limit: 100 });
+      
+      if (response.success && response.data) {
+        setTenants(response.data.tenants);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar tenants:', error);
+    }
+  };
+
+  // Carregar dados iniciais
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 800);
-    return () => clearTimeout(timer);
-  }, []);
-  
-  const filteredUsers = users.filter(user =>
-    user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    user.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+    const loadInitialData = async () => {
+      setIsLoading(true);
+      await Promise.all([
+        loadUsers(1, ''),
+        currentUser?.role === 'superadmin' ? loadTenants() : Promise.resolve(),
+      ]);
+      setIsLoading(false);
+    };
+    
+    loadInitialData();
+  }, [currentUser]);
+
+  // Recarregar ao mudar página
+  useEffect(() => {
+    if (!isLoading) {
+      loadUsers(currentPage, searchQuery);
+    }
+  }, [currentPage]);
+
+  // Debounce na busca
+  useEffect(() => {
+    if (!isLoading) {
+      const timer = setTimeout(() => {
+        setCurrentPage(1);
+        loadUsers(1, searchQuery);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [searchQuery]);
+
+  // ============================================================================
+  // HANDLERS
+  // ============================================================================
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await loadUsers(currentPage, searchQuery);
+    setIsRefreshing(false);
+    toast.success('Lista atualizada');
+  };
 
   const handleOpenCreate = () => {
-    setFormData({ name: '', email: '', role: 'Operador' });
+    setFormData({ 
+      name: '', 
+      email: '', 
+      password: '',
+      role: 'operador',
+      tenantId: currentUser?.tenantId || '',
+    });
     setIsCreateModalOpen(true);
   };
 
   const handleOpenEdit = (user: User) => {
     setSelectedUser(user);
-    setFormData({ name: user.name, email: user.email, role: user.role });
+    setFormData({ 
+      name: user.name, 
+      email: user.email, 
+      password: '',
+      role: user.role,
+      tenantId: user.tenantId || '',
+    });
     setIsEditModalOpen(true);
   };
 
@@ -114,98 +246,147 @@ export default function Usuarios() {
     setIsDeleteDialogOpen(true);
   };
 
-  const handleCreateUser = () => {
-    if (!formData.name || !formData.email) {
+  const handleCreateUser = async () => {
+    if (!formData.name || !formData.email || !formData.password) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
     }
 
-    const newUser: User = {
-      id: String(Date.now()),
-      name: formData.name,
-      email: formData.email,
-      role: formData.role,
-      status: 'pending',
-      lastLogin: '-',
-    };
+    if (formData.password.length < 6) {
+      toast.error('A senha deve ter pelo menos 6 caracteres');
+      return;
+    }
 
-    setUsers(prev => [newUser, ...prev]);
-    setIsCreateModalOpen(false);
-    setFormData({ name: '', email: '', role: 'Operador' });
-    toast.success('Usuário criado com sucesso!');
+    setIsSubmitting(true);
+    
+    try {
+      const payload: Record<string, any> = {
+        name: formData.name,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role,
+      };
+      
+      // Adiciona tenantId se for superadmin e selecionou um tenant
+      if (currentUser?.role === 'superadmin' && formData.tenantId) {
+        payload.tenantId = formData.tenantId;
+      }
+      
+      await api.post('/api/users', payload);
+      
+      toast.success('Usuário criado com sucesso!');
+      setIsCreateModalOpen(false);
+      setFormData({ name: '', email: '', password: '', role: 'operador', tenantId: '' });
+      
+      // Recarregar lista
+      await loadUsers(1, '');
+      setCurrentPage(1);
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao criar usuário');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleUpdateUser = () => {
+  const handleUpdateUser = async () => {
     if (!selectedUser || !formData.name || !formData.email) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
     }
 
-    setUsers(prev => prev.map(u => 
-      u.id === selectedUser.id 
-        ? { ...u, name: formData.name, email: formData.email, role: formData.role }
-        : u
-    ));
-    setIsEditModalOpen(false);
-    setSelectedUser(null);
-    toast.success('Usuário atualizado com sucesso!');
+    setIsSubmitting(true);
+    
+    try {
+      const payload: Record<string, any> = {
+        name: formData.name,
+        email: formData.email,
+        role: formData.role,
+      };
+      
+      // Só envia senha se foi preenchida
+      if (formData.password) {
+        if (formData.password.length < 6) {
+          toast.error('A senha deve ter pelo menos 6 caracteres');
+          setIsSubmitting(false);
+          return;
+        }
+        payload.password = formData.password;
+      }
+      
+      await api.put(`/api/users/${selectedUser.id}`, payload);
+      
+      toast.success('Usuário atualizado com sucesso!');
+      setIsEditModalOpen(false);
+      setSelectedUser(null);
+      
+      // Recarregar lista
+      await loadUsers(currentPage, searchQuery);
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao atualizar usuário');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleDeleteUser = () => {
+  const handleDeleteUser = async () => {
     if (!selectedUser) return;
     
-    setUsers(prev => prev.filter(u => u.id !== selectedUser.id));
-    setIsDeleteDialogOpen(false);
-    setSelectedUser(null);
-    toast.success('Usuário removido com sucesso!');
-  };
-
-  const handleToggleStatus = (user: User) => {
-    const newStatus = user.status === 'active' ? 'inactive' : 'active';
-    setUsers(prev => prev.map(u => 
-      u.id === user.id ? { ...u, status: newStatus } : u
-    ));
-    toast.success(newStatus === 'active' ? 'Usuário ativado!' : 'Usuário desativado!');
-  };
-  
-  return (
-    <DashboardLayout>
-      <Header />
+    setIsSubmitting(true);
+    
+    try {
+      await api.delete(`/api/users/${selectedUser.id}`);
       
-      <div className="p-8 space-y-6 opacity-0 animate-enter" style={{ animationFillMode: 'forwards' }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold text-cs-text-primary flex items-center gap-3">
-              <Users className="w-7 h-7 text-cs-cyan" />
-              Usuários
-            </h2>
-            <p className="text-cs-text-secondary mt-1">Gerencie os usuários do sistema</p>
-          </div>
-          
-          <PermissionGate permission="users:create">
-            <Button 
-              className="bg-gradient-to-r from-cs-cyan to-cs-blue hover:opacity-90"
-              onClick={handleOpenCreate}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Novo Usuário
-            </Button>
-          </PermissionGate>
-        </div>
+      toast.success('Usuário removido com sucesso!');
+      setIsDeleteDialogOpen(false);
+      setSelectedUser(null);
+      
+      // Recarregar lista
+      await loadUsers(currentPage, searchQuery);
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao excluir usuário');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-        <div className="flex items-center gap-4">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cs-text-muted" />
-            <Input
-              placeholder="Buscar usuários..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 bg-cs-bg-card border-border text-cs-text-primary"
-            />
-          </div>
-        </div>
+  const handleToggleStatus = async (user: User) => {
+    try {
+      const endpoint = user.isActive 
+        ? `/api/users/${user.id}/deactivate`
+        : `/api/users/${user.id}/activate`;
+      
+      await api.post(endpoint);
+      
+      toast.success(user.isActive ? 'Usuário desativado!' : 'Usuário ativado!');
+      
+      // Recarregar lista
+      await loadUsers(currentPage, searchQuery);
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao alterar status do usuário');
+    }
+  };
 
-        {isLoading ? (
+  // ============================================================================
+  // RENDER - LOADING STATE
+  // ============================================================================
+
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <Header />
+        <div className="p-8 space-y-6 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <div>
+              <Skeleton className="h-8 w-48" />
+              <Skeleton className="h-4 w-64 mt-2" />
+            </div>
+            <Skeleton className="h-10 w-36" />
+          </div>
+          <Skeleton className="h-10 w-80" />
           <div className="bg-cs-bg-card border border-border rounded-xl overflow-hidden">
             <div className="bg-muted/30 p-4 flex gap-8 border-b border-border">
               <Skeleton className="h-4 w-24" />
@@ -228,43 +409,105 @@ export default function Usuarios() {
               ))}
             </div>
           </div>
-        ) : (
-          <div 
-            className="bg-cs-bg-card border border-border rounded-xl overflow-hidden opacity-0 animate-enter"
-            style={{ animationDelay: '100ms', animationFillMode: 'forwards' }}
-          >
-            <Table>
-              <TableHeader>
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-cs-text-secondary">Nome</TableHead>
-                  <TableHead className="text-cs-text-secondary">Email</TableHead>
-                  <TableHead className="text-cs-text-secondary">Role</TableHead>
-                  <TableHead className="text-cs-text-secondary">Status</TableHead>
-                  <TableHead className="text-cs-text-secondary">Último Login</TableHead>
-                  <TableHead className="text-cs-text-secondary text-right">Ações</TableHead>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  // ============================================================================
+  // RENDER - MAIN
+  // ============================================================================
+  
+  return (
+    <DashboardLayout>
+      <Header />
+      
+      <div className="p-8 space-y-6 opacity-0 animate-enter" style={{ animationFillMode: 'forwards' }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-cs-text-primary flex items-center gap-3">
+              <Users className="w-7 h-7 text-cs-cyan" />
+              Usuários
+            </h2>
+            <p className="text-cs-text-secondary mt-1">Gerencie os usuários do sistema</p>
+          </div>
+          
+          <div className="flex items-center gap-3">
+            <Button 
+              variant="outline" 
+              size="icon"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="border-border text-cs-text-secondary hover:text-cs-text-primary hover:bg-cs-bg-card"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </Button>
+            
+            <PermissionGate permission="users:create">
+              <Button 
+                className="bg-gradient-to-r from-cs-cyan to-cs-blue hover:opacity-90"
+                onClick={handleOpenCreate}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Novo Usuário
+              </Button>
+            </PermissionGate>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cs-text-muted" />
+            <Input
+              placeholder="Buscar usuários..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 bg-cs-bg-card border-border text-cs-text-primary"
+            />
+          </div>
+        </div>
+
+        <div 
+          className="bg-cs-bg-card border border-border rounded-xl overflow-hidden opacity-0 animate-enter"
+          style={{ animationDelay: '100ms', animationFillMode: 'forwards' }}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="text-cs-text-secondary">Nome</TableHead>
+                <TableHead className="text-cs-text-secondary">Email</TableHead>
+                {currentUser?.role === 'superadmin' && (
+                  <TableHead className="text-cs-text-secondary">Tenant</TableHead>
+                )}
+                <TableHead className="text-cs-text-secondary">Role</TableHead>
+                <TableHead className="text-cs-text-secondary">Status</TableHead>
+                <TableHead className="text-cs-text-secondary">Último Login</TableHead>
+                <TableHead className="text-cs-text-secondary text-right">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {users.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={currentUser?.role === 'superadmin' ? 7 : 6} className="h-32">
+                    {searchQuery ? (
+                      <EmptySearchState onClear={() => setSearchQuery('')} />
+                    ) : (
+                      <EmptyState
+                        icon={Users}
+                        title="Nenhum usuário cadastrado"
+                        description="Adicione usuários para gerenciar o acesso ao sistema"
+                        action={{
+                          label: 'Novo Usuário',
+                          onClick: handleOpenCreate
+                        }}
+                      />
+                    )}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredUsers.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="h-32">
-                      {searchQuery ? (
-                        <EmptySearchState onClear={() => setSearchQuery('')} />
-                      ) : (
-                        <EmptyState
-                          icon={Users}
-                          title="Nenhum usuário cadastrado"
-                          description="Adicione usuários para gerenciar o acesso ao sistema"
-                          action={{
-                            label: 'Novo Usuário',
-                            onClick: handleOpenCreate
-                          }}
-                        />
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredUsers.map((user, index) => (
+              ) : (
+                users.map((user, index) => {
+                  const statusProps = getStatusProps(user.isActive);
+                  return (
                     <TableRow 
                       key={user.id} 
                       className="border-border hover:bg-cs-bg-card-hover opacity-0 animate-fade-in"
@@ -272,14 +515,19 @@ export default function Usuarios() {
                     >
                       <TableCell className="font-medium text-cs-text-primary">{user.name}</TableCell>
                       <TableCell className="text-cs-text-secondary">{user.email}</TableCell>
-                      <TableCell className="text-cs-text-secondary">{user.role}</TableCell>
+                      {currentUser?.role === 'superadmin' && (
+                        <TableCell className="text-cs-text-secondary">
+                          {user.tenantName || '-'}
+                        </TableCell>
+                      )}
+                      <TableCell className="text-cs-text-secondary">{getRoleLabel(user.role)}</TableCell>
                       <TableCell>
                         <StatusPill 
-                          status={user.status === 'active' ? 'success' : user.status === 'inactive' ? 'error' : 'warning'}
-                          label={user.status === 'active' ? 'Ativo' : user.status === 'inactive' ? 'Inativo' : 'Pendente'}
+                          status={statusProps.status}
+                          label={statusProps.label}
                         />
                       </TableCell>
-                      <TableCell className="text-cs-text-secondary">{user.lastLogin}</TableCell>
+                      <TableCell className="text-cs-text-secondary">{formatDate(user.lastLoginAt)}</TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -300,7 +548,7 @@ export default function Usuarios() {
                                 className="cursor-pointer"
                                 onClick={() => handleToggleStatus(user)}
                               >
-                                {user.status === 'active' ? (
+                                {user.isActive ? (
                                   <>
                                     <PowerOff className="w-4 h-4 mr-2" />
                                     Desativar
@@ -327,12 +575,47 @@ export default function Usuarios() {
                         </DropdownMenu>
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between px-4 py-4 border-t border-border">
+            <p className="text-sm text-cs-text-secondary">
+              Mostrando {users.length > 0 ? ((currentPage - 1) * 10) + 1 : 0} a {Math.min(currentPage * 10, totalItems)} de {totalItems} usuários
+            </p>
+            
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                className="border-border text-cs-text-secondary hover:text-cs-text-primary"
+              >
+                <ChevronLeft className="w-4 h-4 mr-1" />
+                Anterior
+              </Button>
+              
+              <span className="text-sm text-cs-text-secondary px-3">
+                Página {currentPage} de {totalPages || 1}
+              </span>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                className="border-border text-cs-text-secondary hover:text-cs-text-primary"
+              >
+                Próxima
+                <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+            </div>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Modal de Criação */}
@@ -347,7 +630,7 @@ export default function Usuarios() {
           
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label className="text-cs-text-secondary">Nome</Label>
+              <Label className="text-cs-text-secondary">Nome *</Label>
               <Input
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -356,7 +639,7 @@ export default function Usuarios() {
               />
             </div>
             <div className="space-y-2">
-              <Label className="text-cs-text-secondary">Email</Label>
+              <Label className="text-cs-text-secondary">Email *</Label>
               <Input
                 type="email"
                 value={formData.email}
@@ -366,26 +649,71 @@ export default function Usuarios() {
               />
             </div>
             <div className="space-y-2">
+              <Label className="text-cs-text-secondary">Senha *</Label>
+              <Input
+                type="password"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                placeholder="Mínimo 6 caracteres"
+                className="bg-cs-bg-primary border-border"
+              />
+            </div>
+            <div className="space-y-2">
               <Label className="text-cs-text-secondary">Role</Label>
-              <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+              <Select 
+                value={formData.role} 
+                onValueChange={(value) => setFormData({ ...formData, role: value as UserRole })}
+              >
                 <SelectTrigger className="bg-cs-bg-primary border-border">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Admin">Admin</SelectItem>
-                  <SelectItem value="Operador">Operador</SelectItem>
-                  <SelectItem value="Visualizador">Visualizador</SelectItem>
+                <SelectContent className="bg-cs-bg-card border-border">
+                  {currentUser?.role === 'superadmin' && (
+                    <SelectItem value="admin">Admin</SelectItem>
+                  )}
+                  <SelectItem value="operador">Operador</SelectItem>
+                  <SelectItem value="visualizador">Visualizador</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            
+            {currentUser?.role === 'superadmin' && (
+              <div className="space-y-2">
+                <Label className="text-cs-text-secondary">Tenant</Label>
+                <Select 
+                  value={formData.tenantId} 
+                  onValueChange={(value) => setFormData({ ...formData, tenantId: value })}
+                >
+                  <SelectTrigger className="bg-cs-bg-primary border-border">
+                    <SelectValue placeholder="Selecione um tenant (opcional)" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-cs-bg-card border-border">
+                    {tenants.map((tenant) => (
+                      <SelectItem key={tenant.id} value={tenant.id}>
+                        {tenant.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateModalOpen(false)} className="border-border">
+            <Button 
+              variant="outline" 
+              onClick={() => setIsCreateModalOpen(false)} 
+              className="border-border"
+              disabled={isSubmitting}
+            >
               Cancelar
             </Button>
-            <Button onClick={handleCreateUser} className="bg-gradient-to-r from-cs-cyan to-cs-blue">
-              Criar Usuário
+            <Button 
+              onClick={handleCreateUser} 
+              className="bg-gradient-to-r from-cs-cyan to-cs-blue"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Criando...' : 'Criar Usuário'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -403,7 +731,7 @@ export default function Usuarios() {
           
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label className="text-cs-text-secondary">Nome</Label>
+              <Label className="text-cs-text-secondary">Nome *</Label>
               <Input
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
@@ -412,7 +740,7 @@ export default function Usuarios() {
               />
             </div>
             <div className="space-y-2">
-              <Label className="text-cs-text-secondary">Email</Label>
+              <Label className="text-cs-text-secondary">Email *</Label>
               <Input
                 type="email"
                 value={formData.email}
@@ -422,26 +750,50 @@ export default function Usuarios() {
               />
             </div>
             <div className="space-y-2">
+              <Label className="text-cs-text-secondary">Nova Senha (deixe em branco para manter)</Label>
+              <Input
+                type="password"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                placeholder="Mínimo 6 caracteres"
+                className="bg-cs-bg-primary border-border"
+              />
+            </div>
+            <div className="space-y-2">
               <Label className="text-cs-text-secondary">Role</Label>
-              <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+              <Select 
+                value={formData.role} 
+                onValueChange={(value) => setFormData({ ...formData, role: value as UserRole })}
+              >
                 <SelectTrigger className="bg-cs-bg-primary border-border">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Admin">Admin</SelectItem>
-                  <SelectItem value="Operador">Operador</SelectItem>
-                  <SelectItem value="Visualizador">Visualizador</SelectItem>
+                <SelectContent className="bg-cs-bg-card border-border">
+                  {currentUser?.role === 'superadmin' && (
+                    <SelectItem value="admin">Admin</SelectItem>
+                  )}
+                  <SelectItem value="operador">Operador</SelectItem>
+                  <SelectItem value="visualizador">Visualizador</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
           
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditModalOpen(false)} className="border-border">
+            <Button 
+              variant="outline" 
+              onClick={() => setIsEditModalOpen(false)} 
+              className="border-border"
+              disabled={isSubmitting}
+            >
               Cancelar
             </Button>
-            <Button onClick={handleUpdateUser} className="bg-gradient-to-r from-cs-cyan to-cs-blue">
-              Salvar Alterações
+            <Button 
+              onClick={handleUpdateUser} 
+              className="bg-gradient-to-r from-cs-cyan to-cs-blue"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Salvando...' : 'Salvar Alterações'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -457,12 +809,15 @@ export default function Usuarios() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="border-border">Cancelar</AlertDialogCancel>
+            <AlertDialogCancel className="border-border" disabled={isSubmitting}>
+              Cancelar
+            </AlertDialogCancel>
             <AlertDialogAction 
               onClick={handleDeleteUser}
+              disabled={isSubmitting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Excluir
+              {isSubmitting ? 'Excluindo...' : 'Excluir'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
