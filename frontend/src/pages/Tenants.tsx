@@ -10,7 +10,8 @@ import {
   ChevronRight,
   Power,
   PowerOff,
-  Users
+  Users,
+  RefreshCw
 } from 'lucide-react';
 import { DashboardLayout } from '@/layouts/DashboardLayout';
 import { Header } from '@/components/dashboard/Header';
@@ -54,36 +55,34 @@ import {
 } from "@/components/ui/select";
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { api, ApiError } from '@/lib/api';
+import type { Tenant, TenantStatus, BillingPlan, User } from '@/lib/apiTypes';
 
-interface Tenant {
-  id: string;
-  name: string;
-  slug: string;
-  status: 'active' | 'inactive' | 'pending';
-  createdAt: string;
-  adminId?: string;
+// ============================================================================
+// TIPOS
+// ============================================================================
+
+interface TenantsResponse {
+  tenants: Tenant[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
-// Mock users para seleção de administrador
-const mockUsers = [
-  { id: 'user1', name: 'João Silva', email: 'joao@example.com' },
-  { id: 'user2', name: 'Maria Santos', email: 'maria@example.com' },
-  { id: 'user3', name: 'Pedro Costa', email: 'pedro@example.com' },
-];
+interface UsersResponse {
+  users: User[];
+}
 
-// Mock data inicial
-const initialTenants: Tenant[] = [
-  { id: '1', name: 'Test Tenant Contacts 2', slug: 'test-contacts-2-1768755032367', status: 'active', createdAt: '18/01/2026' },
-  { id: '2', name: 'Other RAG Tenant', slug: 'other-rag-tenant-1768755031953', status: 'active', createdAt: '18/01/2026' },
-  { id: '3', name: 'Test Tenant Contacts 1', slug: 'test-contacts-1768755028908', status: 'active', createdAt: '18/01/2026' },
-  { id: '4', name: 'Test Tenant Lists', slug: 'test-lists-1768755025550', status: 'inactive', createdAt: '18/01/2026' },
-  { id: '5', name: 'Test RAG Tenant', slug: 'test-rag-tenant-1768755024516', status: 'active', createdAt: '18/01/2026' },
-  { id: '6', name: 'Other RAG Tenant', slug: 'other-rag-tenant-1768684979408', status: 'pending', createdAt: '17/01/2026' },
-  { id: '7', name: 'Test RAG Tenant', slug: 'test-rag-tenant-1768684974032', status: 'active', createdAt: '17/01/2026' },
-  { id: '8', name: 'Test Tenant Contacts 2', slug: 'test-contacts-2-1768684977964', status: 'active', createdAt: '17/01/2026' },
-  { id: '9', name: 'Test Tenant Contacts 1', slug: 'test-contacts-1768684975971', status: 'inactive', createdAt: '17/01/2026' },
-  { id: '10', name: 'Test Tenant Lists', slug: 'test-lists-1768684974909', status: 'active', createdAt: '17/01/2026' },
-];
+interface PlansResponse {
+  plans: BillingPlan[];
+}
+
+// ============================================================================
+// FUNÇÕES AUXILIARES
+// ============================================================================
 
 // Função para gerar slug a partir do nome
 const generateSlug = (name: string): string => {
@@ -96,37 +95,155 @@ const generateSlug = (name: string): string => {
   return `${baseSlug}-${Date.now()}`;
 };
 
+// Mapear status do backend para props do StatusPill
+const getStatusProps = (status: TenantStatus) => {
+  switch (status) {
+    case 'active':
+      return { status: 'success' as const, label: 'Ativo' };
+    case 'suspended':
+      return { status: 'error' as const, label: 'Suspenso' };
+    case 'trial':
+      return { status: 'warning' as const, label: 'Trial' };
+    case 'canceled':
+      return { status: 'error' as const, label: 'Cancelado' };
+    default:
+      return { status: 'warning' as const, label: 'Pendente' };
+  }
+};
+
+// Formatar data
+const formatDate = (dateString: string) => {
+  return new Date(dateString).toLocaleDateString('pt-BR');
+};
+
+// ============================================================================
+// COMPONENTE PRINCIPAL
+// ============================================================================
+
 export default function Tenants() {
   const navigate = useNavigate();
+  
+  // Estados de dados
+  const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [plans, setPlans] = useState<BillingPlan[]>([]);
+  
+  // Estados de UI
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [tenants, setTenants] = useState<Tenant[]>(initialTenants);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // Simula carregamento
-  useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 800);
-    return () => clearTimeout(timer);
-  }, []);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Modal de criação
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   const [newTenantName, setNewTenantName] = useState('');
   const [newTenantSlug, setNewTenantSlug] = useState('');
   const [selectedAdmin, setSelectedAdmin] = useState('');
+  const [selectedPlan, setSelectedPlan] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
   
   // Dialog de exclusão
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [tenantToDelete, setTenantToDelete] = useState<Tenant | null>(null);
-  
-  const totalPages = Math.ceil(tenants.length / 10) || 1;
-  const totalItems = tenants.length;
 
-  const filteredTenants = tenants.filter(
-    tenant => 
-      tenant.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tenant.slug.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // ============================================================================
+  // CARREGAR DADOS
+  // ============================================================================
+
+  const loadTenants = async (page = 1, search = '') => {
+    try {
+      const response = await api.get<TenantsResponse>('/api/tenants', {
+        page,
+        limit: 10,
+        search: search || undefined,
+      });
+      
+      if (response.success && response.data) {
+        setTenants(response.data.tenants);
+        setTotalPages(response.data.meta.totalPages);
+        setTotalItems(response.data.meta.total);
+      }
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao carregar tenants');
+    }
+  };
+
+  const loadUsers = async () => {
+    try {
+      const response = await api.get<UsersResponse>('/api/users', {
+        limit: 100,
+        role: 'admin',
+      });
+      
+      if (response.success && response.data) {
+        setUsers(response.data.users);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar usuários:', error);
+    }
+  };
+
+  const loadPlans = async () => {
+    try {
+      const response = await api.get<PlansResponse>('/api/billing/plans');
+      
+      if (response.success && response.data) {
+        setPlans(response.data.plans);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar planos:', error);
+    }
+  };
+
+  // Carregar dados iniciais
+  useEffect(() => {
+    const loadInitialData = async () => {
+      setIsLoading(true);
+      await Promise.all([
+        loadTenants(1, ''),
+        loadUsers(),
+        loadPlans(),
+      ]);
+      setIsLoading(false);
+    };
+    
+    loadInitialData();
+  }, []);
+
+  // Recarregar ao mudar página ou busca
+  useEffect(() => {
+    if (!isLoading) {
+      loadTenants(currentPage, searchQuery);
+    }
+  }, [currentPage]);
+
+  // Debounce na busca
+  useEffect(() => {
+    if (!isLoading) {
+      const timer = setTimeout(() => {
+        setCurrentPage(1);
+        loadTenants(1, searchQuery);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [searchQuery]);
+
+  // ============================================================================
+  // HANDLERS
+  // ============================================================================
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await loadTenants(currentPage, searchQuery);
+    setIsRefreshing(false);
+    toast.success('Lista atualizada');
+  };
 
   // Handler para atualizar slug automaticamente quando nome muda
   const handleNameChange = (name: string) => {
@@ -139,35 +256,59 @@ export default function Tenants() {
   };
 
   // Handler para criar tenant
-  const handleCreateTenant = () => {
+  const handleCreateTenant = async () => {
     if (!newTenantName.trim()) {
       toast.error('Nome do tenant é obrigatório');
       return;
     }
-    if (!selectedAdmin) {
-      toast.error('Selecione um administrador');
+    if (!adminEmail.trim()) {
+      toast.error('Email do administrador é obrigatório');
+      return;
+    }
+    if (!adminPassword.trim() || adminPassword.length < 6) {
+      toast.error('Senha deve ter pelo menos 6 caracteres');
       return;
     }
 
-    const newTenant: Tenant = {
-      id: String(Date.now()),
-      name: newTenantName.trim(),
-      slug: newTenantSlug || generateSlug(newTenantName),
-      status: 'active',
-      createdAt: new Date().toLocaleDateString('pt-BR'),
-      adminId: selectedAdmin,
-    };
+    setIsCreating(true);
+    
+    try {
+      const response = await api.post<{ tenant: Tenant }>('/api/tenants', {
+        name: newTenantName.trim(),
+        slug: newTenantSlug || generateSlug(newTenantName),
+        planId: selectedPlan || undefined,
+        adminName: newTenantName.trim() + ' Admin',
+        adminEmail: adminEmail.trim(),
+        adminPassword: adminPassword,
+      });
 
-    setTenants(prev => [newTenant, ...prev]);
-    setIsCreateModalOpen(false);
+      if (response.success && response.data) {
+        toast.success('Tenant criado com sucesso!');
+        setIsCreateModalOpen(false);
+        resetCreateForm();
+        
+        // Recarregar lista
+        await loadTenants(1, '');
+        setCurrentPage(1);
+        
+        // Navegar para a página de gerenciamento do tenant criado
+        navigate(`/tenants/${response.data.tenant.id}`);
+      }
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao criar tenant');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const resetCreateForm = () => {
     setNewTenantName('');
     setNewTenantSlug('');
     setSelectedAdmin('');
-    
-    toast.success('Tenant criado com sucesso!');
-    
-    // Navegar para a página de gerenciamento do tenant criado
-    navigate(`/tenants/${newTenant.id}`);
+    setSelectedPlan('');
+    setAdminEmail('');
+    setAdminPassword('');
   };
 
   // Handler para abrir dialog de exclusão
@@ -177,12 +318,25 @@ export default function Tenants() {
   };
 
   // Handler para confirmar exclusão
-  const handleConfirmDelete = () => {
-    if (tenantToDelete) {
-      setTenants(prev => prev.filter(t => t.id !== tenantToDelete.id));
+  const handleConfirmDelete = async () => {
+    if (!tenantToDelete) return;
+
+    setIsDeleting(true);
+    
+    try {
+      await api.delete(`/api/tenants/${tenantToDelete.id}`);
+      
       toast.success(`Tenant "${tenantToDelete.name}" removido com sucesso!`);
       setTenantToDelete(null);
       setIsDeleteDialogOpen(false);
+      
+      // Recarregar lista
+      await loadTenants(currentPage, searchQuery);
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || 'Erro ao excluir tenant');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -191,31 +345,30 @@ export default function Tenants() {
     navigate(`/tenants/${tenantId}`);
   };
 
-  // Handler para toggle de status (ativar/desativar)
-  const handleToggleStatus = (tenant: Tenant) => {
-    const newStatus = tenant.status === 'active' ? 'inactive' : 'active';
-    setTenants(prev => 
-      prev.map(t => 
-        t.id === tenant.id ? { ...t, status: newStatus } : t
-      )
-    );
-    toast.success(
-      newStatus === 'active' 
-        ? `Tenant "${tenant.name}" ativado com sucesso!`
-        : `Tenant "${tenant.name}" desativado com sucesso!`
-    );
-  };
-
-  const getStatusProps = (status: string) => {
-    switch (status) {
-      case 'active':
-        return { status: 'success' as const, label: 'Ativo' };
-      case 'inactive':
-        return { status: 'error' as const, label: 'Inativo' };
-      default:
-        return { status: 'warning' as const, label: 'Pendente' };
+  // Handler para toggle de status (ativar/suspender)
+  const handleToggleStatus = async (tenant: Tenant) => {
+    const action = tenant.status === 'active' ? 'suspend' : 'activate';
+    
+    try {
+      await api.post(`/api/tenants/${tenant.id}/${action}`);
+      
+      toast.success(
+        action === 'activate' 
+          ? `Tenant "${tenant.name}" ativado com sucesso!`
+          : `Tenant "${tenant.name}" suspenso com sucesso!`
+      );
+      
+      // Recarregar lista
+      await loadTenants(currentPage, searchQuery);
+    } catch (error) {
+      const apiError = error as ApiError;
+      toast.error(apiError.message || `Erro ao ${action === 'activate' ? 'ativar' : 'suspender'} tenant`);
     }
   };
+
+  // ============================================================================
+  // RENDER - LOADING STATE
+  // ============================================================================
 
   if (isLoading) {
     return (
@@ -271,6 +424,10 @@ export default function Tenants() {
     );
   }
 
+  // ============================================================================
+  // RENDER - MAIN
+  // ============================================================================
+
   return (
     <DashboardLayout>
       <Header />
@@ -289,6 +446,15 @@ export default function Tenants() {
           </div>
           
           <div className="flex items-center gap-3">
+            <Button 
+              variant="outline" 
+              size="icon"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="border-border text-cs-text-secondary hover:text-cs-text-primary hover:bg-cs-bg-card"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </Button>
             <Button 
               variant="outline" 
               className="border-border text-cs-text-secondary hover:text-cs-text-primary hover:bg-cs-bg-card"
@@ -313,15 +479,16 @@ export default function Tenants() {
               <TableRow className="border-border hover:bg-transparent">
                 <TableHead className="text-cs-text-secondary font-medium">Nome</TableHead>
                 <TableHead className="text-cs-text-secondary font-medium">Slug</TableHead>
+                <TableHead className="text-cs-text-secondary font-medium">Plano</TableHead>
                 <TableHead className="text-cs-text-secondary font-medium">Status</TableHead>
                 <TableHead className="text-cs-text-secondary font-medium">Criado em</TableHead>
                 <TableHead className="text-cs-text-secondary font-medium text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredTenants.length === 0 ? (
+              {tenants.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-32">
+                  <TableCell colSpan={6} className="h-32">
                     {searchQuery ? (
                       <EmptySearchState onClear={() => setSearchQuery('')} />
                     ) : (
@@ -338,7 +505,7 @@ export default function Tenants() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredTenants.map((tenant) => {
+                tenants.map((tenant) => {
                   const statusProps = getStatusProps(tenant.status);
                   return (
                     <TableRow 
@@ -351,6 +518,9 @@ export default function Tenants() {
                       <TableCell className="text-cs-text-secondary font-mono text-sm">
                         {tenant.slug}
                       </TableCell>
+                      <TableCell className="text-cs-text-secondary">
+                        {tenant.planName || '-'}
+                      </TableCell>
                       <TableCell>
                         <StatusPill 
                           status={statusProps.status} 
@@ -358,7 +528,7 @@ export default function Tenants() {
                         />
                       </TableCell>
                       <TableCell className="text-cs-text-secondary">
-                        {tenant.createdAt}
+                        {formatDate(tenant.createdAt)}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -371,7 +541,7 @@ export default function Tenants() {
                                 : 'text-cs-text-muted hover:text-cs-success hover:bg-cs-success/10'
                             }`}
                             onClick={() => handleToggleStatus(tenant)}
-                            title={tenant.status === 'active' ? 'Desativar tenant' : 'Ativar tenant'}
+                            title={tenant.status === 'active' ? 'Suspender tenant' : 'Ativar tenant'}
                           >
                             {tenant.status === 'active' ? (
                               <Power className="w-4 h-4" />
@@ -409,7 +579,7 @@ export default function Tenants() {
           {/* Pagination */}
           <div className="flex items-center justify-between px-4 py-4 border-t border-border">
             <p className="text-sm text-cs-text-secondary">
-              Mostrando 1 a {Math.min(10, totalItems)} de {totalItems} tenants
+              Mostrando {tenants.length > 0 ? ((currentPage - 1) * 10) + 1 : 0} a {Math.min(currentPage * 10, totalItems)} de {totalItems} tenants
             </p>
             
             <div className="flex items-center gap-2">
@@ -425,13 +595,13 @@ export default function Tenants() {
               </Button>
               
               <span className="text-sm text-cs-text-secondary px-3">
-                Página {currentPage} de {totalPages}
+                Página {currentPage} de {totalPages || 1}
               </span>
               
               <Button
                 variant="outline"
                 size="sm"
-                disabled={currentPage === totalPages}
+                disabled={currentPage >= totalPages}
                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                 className="border-border text-cs-text-secondary hover:text-cs-text-primary"
               >
@@ -449,14 +619,14 @@ export default function Tenants() {
           <DialogHeader>
             <DialogTitle className="text-xl font-semibold">Criar Novo Tenant</DialogTitle>
             <DialogDescription className="text-cs-text-secondary">
-              Crie um novo tenant e vincule um administrador
+              Crie um novo tenant e configure o administrador inicial
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="tenant-name" className="text-cs-text-secondary">
-                Nome do Tenant
+                Nome do Tenant *
               </Label>
               <Input
                 id="tenant-name"
@@ -479,36 +649,81 @@ export default function Tenants() {
                 className="bg-cs-bg-primary border-border text-cs-text-muted placeholder:text-cs-text-muted"
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label className="text-cs-text-secondary">
-                Administrador do Tenant
+                Plano
               </Label>
-              <Select value={selectedAdmin} onValueChange={setSelectedAdmin}>
+              <Select value={selectedPlan} onValueChange={setSelectedPlan}>
                 <SelectTrigger className="bg-cs-bg-primary border-border text-cs-text-primary">
-                  <SelectValue placeholder="Selecione um usuário..." />
+                  <SelectValue placeholder="Selecione um plano (opcional)..." />
                 </SelectTrigger>
                 <SelectContent className="bg-cs-bg-card border-border">
-                  {mockUsers.map((user) => (
+                  {plans.map((plan) => (
                     <SelectItem 
-                      key={user.id} 
-                      value={user.id}
+                      key={plan.id} 
+                      value={plan.id}
                       className="text-cs-text-primary hover:bg-cs-bg-card-hover focus:bg-cs-bg-card-hover"
                     >
-                      {user.name} ({user.email})
+                      {plan.name} - R$ {plan.priceMonthly.toFixed(2)}/mês
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="border-t border-border pt-4 mt-4">
+              <h4 className="text-sm font-medium text-cs-text-primary mb-3">Administrador do Tenant</h4>
+              
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="admin-email" className="text-cs-text-secondary">
+                    Email do Administrador *
+                  </Label>
+                  <Input
+                    id="admin-email"
+                    type="email"
+                    placeholder="admin@empresa.com"
+                    value={adminEmail}
+                    onChange={(e) => setAdminEmail(e.target.value)}
+                    className="bg-cs-bg-primary border-border text-cs-text-primary placeholder:text-cs-text-muted"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="admin-password" className="text-cs-text-secondary">
+                    Senha do Administrador *
+                  </Label>
+                  <Input
+                    id="admin-password"
+                    type="password"
+                    placeholder="Mínimo 6 caracteres"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    className="bg-cs-bg-primary border-border text-cs-text-primary placeholder:text-cs-text-muted"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
           
           <DialogFooter>
             <Button
+              variant="outline"
+              onClick={() => {
+                setIsCreateModalOpen(false);
+                resetCreateForm();
+              }}
+              className="border-border text-cs-text-secondary hover:text-cs-text-primary"
+            >
+              Cancelar
+            </Button>
+            <Button
               onClick={handleCreateTenant}
+              disabled={isCreating}
               className="bg-gradient-to-r from-cs-cyan to-cs-blue hover:opacity-90"
             >
-              Criar Tenant
+              {isCreating ? 'Criando...' : 'Criar Tenant'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -532,9 +747,10 @@ export default function Tenants() {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmDelete}
+              disabled={isDeleting}
               className="bg-cs-error hover:bg-cs-error/90 text-white"
             >
-              Excluir Tenant
+              {isDeleting ? 'Excluindo...' : 'Excluir Tenant'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
