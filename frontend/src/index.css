@@ -1,0 +1,260 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+/* CodeSolve Social Media - Design System
+   ========================================= */
+
+@layer base {
+  :root {
+    /* Cores Primárias e de Destaque */
+    --cs-cyan: 191 100% 50%;
+    --cs-blue: 216 100% 50%;
+    --cs-mid-blue: 204 100% 50%;
+    
+    /* Gradientes */
+    --gradient-primary: linear-gradient(135deg, #00D4FF 0%, #0066FF 100%);
+    --gradient-primary-horizontal: linear-gradient(to right, #00D4FF, #0066FF);
+    --gradient-glow: radial-gradient(circle, rgba(0, 212, 255, 0.3) 0%, transparent 70%);
+    
+    /* Cores de Fundo (Dark Mode) */
+    --background: 240 33% 6%;
+    --foreground: 240 33% 96%;
+    
+    --cs-bg-primary: 240 33% 9%;
+    --cs-bg-sidebar: 240 29% 14%;
+    --cs-bg-card: 240 33% 18%;
+    --cs-bg-card-hover: 240 28% 23%;
+    --cs-bg-input: 240 28% 21%;
+    
+    /* Bordas */
+    --border: 240 20% 29%;
+    --cs-border-light: 240 18% 35%;
+    --cs-border-focus: 191 100% 50%;
+    
+    /* Texto */
+    --cs-text-primary: 240 33% 96%;
+    --cs-text-secondary: 240 8% 65%;
+    --cs-text-disabled: 240 6% 41%;
+    
+    /* Estados */
+    --cs-success: 160 96% 48%;
+    --cs-warning: 41 100% 50%;
+    --cs-error: 0 100% 65%;
+    --cs-info: 191 100% 50%;
+    
+    /* Status Backgrounds */
+    --cs-success-bg: 160 96% 48% / 0.15;
+    --cs-warning-bg: 41 100% 50% / 0.15;
+    --cs-error-bg: 0 100% 65% / 0.15;
+    --cs-info-bg: 191 100% 50% / 0.15;
+
+    /* Shadcn semantic tokens mapped to CodeSolve */
+    --card: 240 33% 18%;
+    --card-foreground: 240 33% 96%;
+    
+    --popover: 240 33% 18%;
+    --popover-foreground: 240 33% 96%;
+    
+    --primary: 191 100% 50%;
+    --primary-foreground: 240 33% 9%;
+    
+    --secondary: 240 33% 18%;
+    --secondary-foreground: 240 33% 96%;
+    
+    --muted: 240 28% 21%;
+    --muted-foreground: 240 8% 65%;
+    
+    --accent: 216 100% 50%;
+    --accent-foreground: 240 33% 96%;
+    
+    --destructive: 0 100% 65%;
+    --destructive-foreground: 240 33% 96%;
+    
+    --input: 240 20% 29%;
+    --ring: 191 100% 50%;
+    
+    --radius: 0.75rem;
+    
+    /* Sidebar */
+    --sidebar-background: 240 29% 14%;
+    --sidebar-foreground: 240 8% 65%;
+    --sidebar-primary: 191 100% 50%;
+    --sidebar-primary-foreground: 240 33% 9%;
+    --sidebar-accent: 240 33% 18%;
+    --sidebar-accent-foreground: 240 33% 96%;
+    --sidebar-border: 240 20% 29%;
+    --sidebar-ring: 191 100% 50%;
+  }
+
+  /* Light Mode */
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 10%;
+    
+    --cs-bg-primary: 220 20% 97%;
+    --cs-bg-sidebar: 220 15% 95%;
+    --cs-bg-card: 0 0% 100%;
+    --cs-bg-card-hover: 220 15% 96%;
+    --cs-bg-input: 220 15% 95%;
+    
+    --border: 220 15% 85%;
+    --cs-border-light: 220 12% 75%;
+    
+    --cs-text-primary: 240 10% 10%;
+    --cs-text-secondary: 240 5% 45%;
+    --cs-text-disabled: 240 5% 65%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 10%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 10%;
+    
+    --primary: 191 100% 40%;
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 220 15% 95%;
+    --secondary-foreground: 240 10% 10%;
+    
+    --muted: 220 15% 92%;
+    --muted-foreground: 240 5% 45%;
+    
+    --accent: 216 100% 45%;
+    --accent-foreground: 0 0% 100%;
+    
+    --input: 220 15% 85%;
+    
+    --sidebar-background: 220 15% 95%;
+    --sidebar-foreground: 240 5% 45%;
+    --sidebar-accent: 220 15% 90%;
+    --sidebar-accent-foreground: 240 10% 10%;
+    --sidebar-border: 220 15% 85%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+@layer components {
+  /* Gradiente de Texto */
+  .text-gradient {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Botão Primário com Gradiente */
+  .btn-gradient {
+    background: var(--gradient-primary);
+    color: hsl(var(--cs-text-primary));
+    transition: all 150ms ease;
+  }
+
+  .btn-gradient:hover {
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.4);
+    transform: translateY(-1px);
+  }
+
+  /* Card do CodeSolve */
+  .cs-card {
+    background: hsl(var(--cs-bg-card));
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    transition: border-color 250ms ease;
+  }
+
+  .cs-card:hover {
+    border-color: hsl(var(--cs-border-light));
+  }
+
+  /* Glow Effects */
+  .glow-cyan {
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+  }
+
+  .glow-cyan-sm {
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+  }
+
+  /* Status Pills */
+  .status-success {
+    background: hsl(var(--cs-success-bg));
+    color: hsl(var(--cs-success));
+  }
+
+  .status-warning {
+    background: hsl(var(--cs-warning-bg));
+    color: hsl(var(--cs-warning));
+  }
+
+  .status-error {
+    background: hsl(var(--cs-error-bg));
+    color: hsl(var(--cs-error));
+  }
+
+  .status-info {
+    background: hsl(var(--cs-info-bg));
+    color: hsl(var(--cs-info));
+  }
+
+  /* Sidebar item states */
+  .sidebar-item-active {
+    background: linear-gradient(to right, hsl(240 33% 18%), hsl(240 20% 29%));
+    color: hsl(var(--cs-cyan));
+    border-left: 3px solid hsl(var(--cs-cyan));
+  }
+
+  /* Scrollbar customizada */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--cs-bg-primary));
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--cs-border-light));
+  }
+}
+
+@layer utilities {
+  .animate-glow {
+    animation: glow 2s ease-in-out infinite alternate;
+  }
+
+  @keyframes glow {
+    from {
+      box-shadow: 0 0 10px rgba(0, 212, 255, 0.2);
+    }
+    to {
+      box-shadow: 0 0 20px rgba(0, 212, 255, 0.4);
+    }
+  }
+
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}

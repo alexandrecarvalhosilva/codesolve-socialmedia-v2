@@ -1,0 +1,85 @@
+# =============================================================================
+# Docker Compose - CodeSolve Social Media BACKEND
+# =============================================================================
+# 
+# Uso:
+#   Produção:      docker compose up -d --build
+#   Desenvolvimento: docker compose --profile dev up
+#
+# Pré-requisitos:
+#   - PostgreSQL rodando em 72.60.3.251:5432
+#   - Redis rodando em 72.60.3.251:6379
+#   - Banco de dados 'codesolve-socialmedia' criado
+#
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Database Migration Service (runs once on startup)
+  # ===========================================================================
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: codesolve-migrate
+    network_mode: host
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:9ee5b061c99d1c2d8127e96bb5ea8da2@72.60.3.251:5432/codesolve-socialmedia}
+    command: sh -c "npx prisma db push --accept-data-loss && npx prisma db seed"
+    restart: "no"
+
+  # ===========================================================================
+  # Production Backend Service
+  # ===========================================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: codesolve-backend
+    network_mode: host
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:9ee5b061c99d1c2d8127e96bb5ea8da2@72.60.3.251:5432/codesolve-socialmedia}
+      - REDIS_URL=${REDIS_URL:-redis://72.60.3.251:6379}
+      - JWT_SECRET=${JWT_SECRET:-cd83afce33e1ba7aeba5e3cfc6e635758a0b48af41ae378c239f0140ebd3d6a1f45bb47e6b1898d53ed71ef04baf43c974cf435ba8457ba259adbf2292377e9b}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-30d}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost,http://localhost:80,http://localhost:5173}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ===========================================================================
+  # Development Backend Service (use with --profile dev)
+  # ===========================================================================
+  backend-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: codesolve-backend-dev
+    network_mode: host
+    volumes:
+      - .:/app
+      - backend_node_modules:/app/node_modules
+      - backend_prisma:/app/node_modules/.prisma
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:9ee5b061c99d1c2d8127e96bb5ea8da2@72.60.3.251:5432/codesolve-socialmedia}
+      - REDIS_URL=${REDIS_URL:-redis://72.60.3.251:6379}
+      - JWT_SECRET=${JWT_SECRET:-cd83afce33e1ba7aeba5e3cfc6e635758a0b48af41ae378c239f0140ebd3d6a1f45bb47e6b1898d53ed71ef04baf43c974cf435ba8457ba259adbf2292377e9b}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-30d}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost,http://localhost:80,http://localhost:5173}
+    profiles:
+      - dev
+
+volumes:
+  backend_node_modules:
+  backend_prisma:

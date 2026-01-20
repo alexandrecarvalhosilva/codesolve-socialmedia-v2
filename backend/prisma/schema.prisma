@@ -1,0 +1,1261 @@
+// CodeSolve Social Media Platform - Database Schema
+// PostgreSQL + Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// TENANTS & USERS
+// ============================================================================
+
+model Tenant {
+  id                String    @id @default(uuid())
+  name              String
+  slug              String    @unique
+  domain            String?
+  logo              String?
+  
+  // Status
+  status            TenantStatus @default(active)
+  
+  // Plan & Billing
+  planId            String?
+  plan              BillingPlan? @relation(fields: [planId], references: [id])
+  billingCycle      BillingCycle @default(monthly)
+  trialEndsAt       DateTime?
+  asaasCustomerId   String?
+  stripeCustomerId  String?
+  
+  // Settings
+  timezone          String    @default("America/Sao_Paulo")
+  language          String    @default("pt-BR")
+  niche             String?
+  
+  // Timestamps
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+  
+  // Relations
+  users             User[]
+  subscriptions     Subscription[]
+  whatsappInstances WhatsappInstance[]
+  instagramAccounts InstagramAccount[]
+  conversations     Conversation[]
+  messages          Message[]
+  calendarEvents    CalendarEvent[]
+  automations       Automation[]
+  tickets           Ticket[]
+  invoices          Invoice[]
+  tenantModules     TenantModule[]
+  usageRecords      UsageRecord[]
+  mediaFiles        MediaFile[]
+  googleOAuthTokens GoogleOAuthToken[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  
+  @@map("tenants")
+}
+
+enum TenantStatus {
+  active
+  suspended
+  trial
+  canceled
+}
+
+enum BillingCycle {
+  monthly
+  quarterly
+  semiannual
+  annual
+}
+
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique
+  passwordHash      String
+  name              String
+  avatar            String?
+  phone             String?
+  
+  // Role & Tenant
+  role              UserRole  @default(operador)
+  tenantId          String?
+  tenant            Tenant?   @relation(fields: [tenantId], references: [id])
+  
+  // Status
+  isActive          Boolean   @default(true)
+  emailVerified     Boolean   @default(false)
+  lastLoginAt       DateTime?
+  
+  // Timestamps
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+  
+  // Relations
+  assignedConversations Conversation[] @relation("AssignedOperator")
+  sentMessages      Message[]
+  createdAutomations Automation[] @relation("AutomationCreator")
+  approvedAutomations Automation[] @relation("AutomationApprover")
+  tickets           Ticket[]  @relation("TicketCreator")
+  assignedTickets   Ticket[]  @relation("TicketAssignee")
+  ticketMessages    TicketMessage[]
+  googleOAuthTokens GoogleOAuthToken[]
+  notifications     Notification[]
+  auditLogs         AuditLog[]
+  sessions          Session[]
+  
+  @@map("users")
+}
+
+enum UserRole {
+  superadmin
+  admin
+  operador
+  visualizador
+}
+
+model Session {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token         String   @unique
+  userAgent     String?
+  ipAddress     String?
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  
+  @@map("sessions")
+}
+
+// ============================================================================
+// BILLING & PLANS
+// ============================================================================
+
+model BillingPlan {
+  id                    String    @id @default(uuid())
+  slug                  String    @unique
+  name                  String
+  description           String?
+  
+  // Limits
+  maxWhatsappInstances  Int       @default(1)
+  maxMessagesPerMonth   Int       @default(500)
+  maxUsers              Int       @default(2)
+  maxAiTokensPerMonth   Int       @default(10000)
+  maxActiveAutomations  Int       @default(0)
+  maxStorageBytes       BigInt    @default(524288000) // 500 MB
+  
+  // Prices (in cents)
+  priceMonthly          Int       @default(0)
+  priceQuarterly        Int       @default(0)
+  priceSemiannual       Int       @default(0)
+  priceAnnual           Int       @default(0)
+  
+  // Features
+  hasAi                 Boolean   @default(false)
+  hasAutomations        Boolean   @default(false)
+  hasCalendarSync       Boolean   @default(false)
+  hasPrioritySupport    Boolean   @default(false)
+  
+  // Status
+  isActive              Boolean   @default(true)
+  isPublic              Boolean   @default(true)
+  sortOrder             Int       @default(0)
+  
+  // Timestamps
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  
+  // Relations
+  tenants               Tenant[]
+  subscriptions         Subscription[]
+  planModules           PlanModule[]
+  
+  @@map("billing_plans")
+}
+
+model BillingModule {
+  id            String         @id @default(uuid())
+  slug          String         @unique
+  name          String
+  description   String?
+  
+  // Pricing
+  price         Int            @default(0) // in cents
+  isRecurring   Boolean        @default(true)
+  isPerUnit     Boolean        @default(false)
+  
+  // Metadata
+  category      ModuleCategory
+  iconName      String?
+  dependsOn     String?        // slug of dependent module
+  
+  // Status
+  isActive      Boolean        @default(true)
+  sortOrder     Int            @default(0)
+  
+  // Timestamps
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  
+  // Relations
+  planModules   PlanModule[]
+  tenantModules TenantModule[]
+  
+  @@map("billing_modules")
+}
+
+enum ModuleCategory {
+  core
+  communication
+  ai
+  productivity
+  billing
+  social
+}
+
+model PlanModule {
+  id        String        @id @default(uuid())
+  planId    String
+  plan      BillingPlan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+  moduleId  String
+  module    BillingModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  
+  @@unique([planId, moduleId])
+  @@map("plan_modules")
+}
+
+model TenantModule {
+  id            String        @id @default(uuid())
+  tenantId      String
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  moduleId      String
+  module        BillingModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  
+  quantity      Int           @default(1)
+  status        ModuleStatus  @default(active)
+  activatedAt   DateTime      @default(now())
+  deactivatedAt DateTime?
+  
+  @@unique([tenantId, moduleId])
+  @@map("tenant_modules")
+}
+
+enum ModuleStatus {
+  active
+  inactive
+}
+
+model Subscription {
+  id                  String             @id @default(uuid())
+  tenantId            String
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  planId              String
+  plan                BillingPlan        @relation(fields: [planId], references: [id])
+  
+  status              SubscriptionStatus @default(active)
+  billingCycle        BillingCycle       @default(monthly)
+  
+  currentPeriodStart  DateTime
+  currentPeriodEnd    DateTime
+  
+  canceledAt          DateTime?
+  cancelReason        String?
+  
+  // External IDs
+  stripeSubscriptionId String?
+  asaasSubscriptionId  String?
+  
+  // Discount
+  discountPercent     Int                @default(0)
+  discountReason      String?
+  
+  // Timestamps
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  
+  // Relations
+  invoices            Invoice[]
+  
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  active
+  canceled
+  past_due
+  trialing
+  paused
+  suspended
+}
+
+model Invoice {
+  id                String        @id @default(uuid())
+  tenantId          String
+  tenant            Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscriptionId    String?
+  subscription      Subscription? @relation(fields: [subscriptionId], references: [id])
+  
+  invoiceNumber     String        @unique
+  status            InvoiceStatus @default(pending)
+  
+  // Amounts (in cents)
+  subtotal          Int
+  discount          Int           @default(0)
+  tax               Int           @default(0)
+  total             Int
+  creditsApplied    Int           @default(0)
+  
+  currency          String        @default("BRL")
+  dueDate           DateTime
+  paidAt            DateTime?
+  
+  // Payment
+  paymentMethod     PaymentMethodType?
+  paymentReference  String?
+  
+  // External IDs
+  stripeInvoiceId   String?       @unique
+  asaasPaymentId    String?       @unique
+  
+  notes             String?
+  
+  // Timestamps
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  // Relations
+  items             InvoiceItem[]
+  payments          Payment[]
+  nfEmissions       NfEmission[]
+  
+  @@map("invoices")
+}
+
+enum InvoiceStatus {
+  pending
+  processing
+  paid
+  overdue
+  canceled
+  refunded
+}
+
+enum PaymentMethodType {
+  credit_card
+  pix
+  boleto
+}
+
+model InvoiceItem {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Int      // in cents
+  total       Int
+  
+  moduleId    String?
+  periodStart DateTime?
+  periodEnd   DateTime?
+  
+  @@map("invoice_items")
+}
+
+model Payment {
+  id                    String            @id @default(uuid())
+  invoiceId             String
+  invoice               Invoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  amount                Int
+  currency              String            @default("BRL")
+  status                PaymentStatus     @default(pending)
+  
+  // External IDs
+  stripePaymentIntentId String?           @unique
+  asaasPaymentId        String?
+  
+  errorMessage          String?
+  processedAt           DateTime?
+  
+  // Timestamps
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  pending
+  processing
+  succeeded
+  failed
+  refunded
+}
+
+model DiscountCoupon {
+  id              String       @id @default(uuid())
+  code            String       @unique
+  description     String?
+  
+  discountType    DiscountType
+  discountValue   Int          // percent or cents
+  
+  maxUses         Int?
+  usedCount       Int          @default(0)
+  minPurchase     Int?
+  
+  validFrom       DateTime?
+  validUntil      DateTime?
+  applicablePlans String[]     @default([])
+  
+  isActive        Boolean      @default(true)
+  createdBy       String?
+  
+  // Timestamps
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  
+  // Relations
+  usages          CouponUsage[]
+  
+  @@map("discount_coupons")
+}
+
+enum DiscountType {
+  percent
+  fixed
+}
+
+model CouponUsage {
+  id              String         @id @default(uuid())
+  couponId        String
+  coupon          DiscountCoupon @relation(fields: [couponId], references: [id])
+  tenantId        String
+  invoiceId       String?
+  discountApplied Int
+  usedAt          DateTime       @default(now())
+  
+  @@map("coupon_usages")
+}
+
+model NfEmission {
+  id                String       @id @default(uuid())
+  tenantId          String
+  invoiceId         String
+  invoice           Invoice      @relation(fields: [invoiceId], references: [id])
+  
+  provider          String       // 'asaas', 'nfe_io', 'plugnotas'
+  externalId        String?
+  
+  status            NfStatus     @default(pending)
+  nfNumber          String?
+  nfSeries          String?
+  nfKey             String?      // chave de acesso
+  nfUrl             String?
+  nfPdfUrl          String?
+  nfXmlUrl          String?
+  
+  amountCents       Int
+  serviceDescription String
+  
+  issuedAt          DateTime?
+  cancelledAt       DateTime?
+  errorMessage      String?
+  
+  // Timestamps
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  @@map("nf_emissions")
+}
+
+enum NfStatus {
+  pending
+  processing
+  issued
+  error
+  cancelled
+}
+
+// ============================================================================
+// WHATSAPP
+// ============================================================================
+
+model WhatsappInstance {
+  id                String              @id @default(uuid())
+  tenantId          String
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name              String
+  evolutionInstanceId String?           @unique
+  phoneNumber       String?
+  
+  status            WhatsappInstanceStatus @default(disconnected)
+  qrCode            String?
+  
+  // Credentials (encrypted)
+  apiKeyEncrypted   String?
+  webhookSecret     String?
+  
+  // Timestamps
+  connectedAt       DateTime?
+  disconnectedAt    DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  deletedAt         DateTime?
+  
+  // Relations
+  conversations     Conversation[]
+  
+  @@map("whatsapp_instances")
+}
+
+enum WhatsappInstanceStatus {
+  connected
+  disconnected
+  connecting
+  reconnecting
+  error
+}
+
+// ============================================================================
+// INSTAGRAM
+// ============================================================================
+
+model InstagramAccount {
+  id                  String   @id @default(uuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  igUserId            String   @unique
+  username            String
+  name                String?
+  biography           String?
+  profilePictureUrl   String?
+  
+  followersCount      Int      @default(0)
+  followsCount        Int      @default(0)
+  mediaCount          Int      @default(0)
+  
+  accountType         String?  // 'BUSINESS' | 'MEDIA_CREATOR'
+  website             String?
+  
+  // Tokens (encrypted)
+  accessTokenEncrypted  String
+  tokenExpiresAt        DateTime?
+  
+  // Facebook Page (required for Instagram API)
+  facebookPageId      String?
+  
+  // Status
+  isConnected         Boolean  @default(true)
+  lastSyncAt          DateTime?
+  errorMessage        String?
+  
+  // Timestamps
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  
+  // Relations
+  posts               InstagramPost[]
+  conversations       InstagramConversation[]
+  
+  @@map("instagram_accounts")
+}
+
+model InstagramPost {
+  id              String           @id @default(uuid())
+  accountId       String
+  account         InstagramAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  igMediaId       String           @unique
+  mediaType       String           // 'IMAGE' | 'VIDEO' | 'CAROUSEL_ALBUM'
+  mediaUrl        String
+  thumbnailUrl    String?
+  permalink       String
+  caption         String?
+  
+  likeCount       Int              @default(0)
+  commentsCount   Int              @default(0)
+  
+  // Insights
+  reach           Int?
+  impressions     Int?
+  saved           Int?
+  engagement      Int?
+  
+  timestamp       DateTime
+  
+  // Timestamps
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  
+  // Relations
+  comments        InstagramComment[]
+  
+  @@map("instagram_posts")
+}
+
+model InstagramComment {
+  id            String        @id @default(uuid())
+  postId        String
+  post          InstagramPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  
+  igCommentId   String        @unique
+  text          String
+  username      String
+  likeCount     Int           @default(0)
+  isHidden      Boolean       @default(false)
+  
+  parentId      String?
+  parent        InstagramComment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies       InstagramComment[] @relation("CommentReplies")
+  
+  timestamp     DateTime
+  
+  // Timestamps
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  @@map("instagram_comments")
+}
+
+model InstagramConversation {
+  id                String           @id @default(uuid())
+  accountId         String
+  account           InstagramAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  igConversationId  String           @unique
+  participantUserId String
+  participantUsername String
+  participantProfilePic String?
+  
+  unreadCount       Int              @default(0)
+  
+  // Timestamps
+  lastMessageAt     DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  
+  // Relations
+  messages          InstagramDM[]
+  
+  @@map("instagram_conversations")
+}
+
+model InstagramDM {
+  id              String                @id @default(uuid())
+  conversationId  String
+  conversation    InstagramConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  igMessageId     String                @unique
+  fromUserId      String
+  fromUsername    String
+  isFromMe        Boolean
+  
+  text            String?
+  mediaUrl        String?
+  mediaType       String?               // 'IMAGE' | 'VIDEO' | 'AUDIO' | 'SHARE'
+  
+  timestamp       DateTime
+  
+  // Timestamps
+  createdAt       DateTime              @default(now())
+  
+  @@map("instagram_dms")
+}
+
+// ============================================================================
+// CHAT / CONVERSATIONS
+// ============================================================================
+
+model Conversation {
+  id                String             @id @default(uuid())
+  tenantId          String
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Source
+  channel           ConversationChannel
+  whatsappInstanceId String?
+  whatsappInstance  WhatsappInstance?  @relation(fields: [whatsappInstanceId], references: [id])
+  
+  // Contact
+  contactPhone      String?
+  contactName       String?
+  contactEmail      String?
+  contactAvatar     String?
+  
+  // Status
+  status            ConversationStatus @default(open)
+  priority          ConversationPriority @default(normal)
+  
+  // Assignment
+  assignedToId      String?
+  assignedTo        User?              @relation("AssignedOperator", fields: [assignedToId], references: [id])
+  
+  // AI
+  aiEnabled         Boolean            @default(true)
+  aiEscalationCount Int                @default(0)
+  
+  // Tags
+  tags              String[]           @default([])
+  
+  // Timestamps
+  lastMessageAt     DateTime?
+  closedAt          DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  
+  // Relations
+  messages          Message[]
+  
+  @@map("conversations")
+}
+
+enum ConversationChannel {
+  whatsapp
+  instagram
+  facebook
+  email
+  webchat
+}
+
+enum ConversationStatus {
+  open
+  pending
+  resolved
+  closed
+}
+
+enum ConversationPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+model Message {
+  id                  String       @id @default(uuid())
+  tenantId            String
+  tenant              Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId      String
+  conversation        Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  // Content
+  content             String
+  type                MessageType  @default(text)
+  
+  // Direction
+  direction           MessageDirection
+  
+  // Sender
+  senderId            String?
+  sender              User?        @relation(fields: [senderId], references: [id])
+  senderName          String?
+  isFromAi            Boolean      @default(false)
+  
+  // Status
+  status              MessageStatus @default(sent)
+  
+  // External ID (for idempotency)
+  evolutionMessageId  String?
+  
+  // Media
+  mediaUrl            String?
+  mediaType           String?
+  mediaMimeType       String?
+  
+  // Timestamps
+  readAt              DateTime?
+  deliveredAt         DateTime?
+  createdAt           DateTime     @default(now())
+  
+  // Relations
+  mediaFiles          MediaFile[]
+  
+  @@unique([tenantId, evolutionMessageId])
+  @@map("messages")
+}
+
+enum MessageType {
+  text
+  image
+  audio
+  video
+  document
+  location
+  contact
+  sticker
+  reaction
+}
+
+enum MessageDirection {
+  inbound
+  outbound
+}
+
+enum MessageStatus {
+  pending
+  sent
+  delivered
+  read
+  failed
+}
+
+// ============================================================================
+// CALENDAR
+// ============================================================================
+
+model CalendarEvent {
+  id                String            @id @default(uuid())
+  tenantId          String
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  title             String
+  description       String?
+  location          String?
+  
+  startAt           DateTime
+  endAt             DateTime
+  allDay            Boolean           @default(false)
+  
+  // Recurrence
+  recurrence        String?           // RRULE format
+  
+  // External sync
+  externalEventId   String?
+  externalCalendarId String?
+  syncStatus        CalendarEventSyncStatus @default(local)
+  lastSyncAt        DateTime?
+  
+  // Metadata
+  color             String?
+  reminders         Json?
+  attendees         Json?
+  
+  // Timestamps
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  deletedAt         DateTime?
+  
+  @@unique([tenantId, externalEventId])
+  @@map("calendar_events")
+}
+
+enum CalendarEventSyncStatus {
+  local
+  synced
+  pending_sync
+  conflict
+  error
+}
+
+model GoogleOAuthToken {
+  id                    String   @id @default(uuid())
+  tenantId              String
+  tenant                Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  email                 String
+  accessTokenEncrypted  String
+  refreshTokenEncrypted String
+  expiresAt             DateTime
+  scopes                String[]
+  
+  // Timestamps
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  @@unique([tenantId, email])
+  @@map("google_oauth_tokens")
+}
+
+model CalendarSyncLog {
+  id              String   @id @default(uuid())
+  tenantId        String
+  calendarId      String
+  
+  lastSyncAt      DateTime?
+  lastSyncToken   String?
+  syncStatus      String   @default("idle") // idle, syncing, error
+  errorMessage    String?
+  eventsSynced    Int      @default(0)
+  
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@unique([tenantId, calendarId])
+  @@map("calendar_sync_status")
+}
+
+// ============================================================================
+// AUTOMATIONS
+// ============================================================================
+
+model Automation {
+  id              String           @id @default(uuid())
+  tenantId        String
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name            String
+  description     String?
+  
+  // Trigger
+  trigger         Json             // { type: 'message_received' | 'schedule' | 'event', config: {...} }
+  
+  // Conditions
+  conditions      Json?            // Array of conditions
+  
+  // Actions
+  actions         Json             // Array of actions
+  
+  // Status
+  status          AutomationStatus @default(draft)
+  version         Int              @default(1)
+  
+  // Approval
+  approvedById    String?
+  approvedBy      User?            @relation("AutomationApprover", fields: [approvedById], references: [id])
+  approvedAt      DateTime?
+  rejectionReason String?
+  
+  // Test results
+  testResults     Json?
+  
+  // Stats
+  executionCount  Int              @default(0)
+  lastExecutedAt  DateTime?
+  
+  // Creator
+  createdById     String
+  createdBy       User             @relation("AutomationCreator", fields: [createdById], references: [id])
+  
+  // Timestamps
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+  
+  // Relations
+  versions        AutomationVersion[]
+  executions      AutomationExecution[]
+  testRuns        AutomationTestRun[]
+  
+  @@map("automations")
+}
+
+enum AutomationStatus {
+  draft
+  testing
+  pending_approval
+  active
+  paused
+  error
+}
+
+model AutomationVersion {
+  id            String     @id @default(uuid())
+  automationId  String
+  automation    Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  
+  version       Int
+  trigger       Json
+  conditions    Json?
+  actions       Json
+  
+  createdById   String
+  createdAt     DateTime   @default(now())
+  
+  @@unique([automationId, version])
+  @@map("automation_versions")
+}
+
+model AutomationExecution {
+  id                String     @id @default(uuid())
+  tenantId          String
+  automationId      String
+  automation        Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  
+  automationVersion Int
+  triggerEvent      Json
+  
+  status            ExecutionStatus @default(pending)
+  
+  startedAt         DateTime?
+  completedAt       DateTime?
+  errorMessage      String?
+  executionLog      Json?
+  
+  createdAt         DateTime   @default(now())
+  
+  @@map("automation_executions")
+}
+
+enum ExecutionStatus {
+  pending
+  running
+  completed
+  failed
+}
+
+model AutomationTestRun {
+  id            String     @id @default(uuid())
+  tenantId      String
+  automationId  String
+  automation    Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  
+  testInput     Json
+  testOutput    Json?
+  success       Boolean
+  logs          String[]
+  
+  executedById  String
+  executedAt    DateTime   @default(now())
+  
+  @@map("automation_test_runs")
+}
+
+// ============================================================================
+// SUPPORT / TICKETS
+// ============================================================================
+
+model Ticket {
+  id              String        @id @default(uuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  ticketNumber    String        @unique
+  subject         String
+  description     String
+  
+  status          TicketStatus  @default(open)
+  priority        TicketPriority @default(medium)
+  category        String?
+  
+  // Creator
+  createdById     String
+  createdBy       User          @relation("TicketCreator", fields: [createdById], references: [id])
+  
+  // Assignee
+  assignedToId    String?
+  assignedTo      User?         @relation("TicketAssignee", fields: [assignedToId], references: [id])
+  
+  // SLA
+  slaId           String?
+  sla             SLA?          @relation(fields: [slaId], references: [id])
+  firstResponseAt DateTime?
+  slaBreachedAt   DateTime?
+  
+  // Timestamps
+  resolvedAt      DateTime?
+  closedAt        DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  // Relations
+  messages        TicketMessage[]
+  
+  @@map("tickets")
+}
+
+enum TicketStatus {
+  open
+  in_progress
+  waiting_customer
+  waiting_internal
+  resolved
+  closed
+}
+
+enum TicketPriority {
+  low
+  medium
+  high
+  urgent
+}
+
+model TicketMessage {
+  id          String   @id @default(uuid())
+  ticketId    String
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  
+  content     String
+  isInternal  Boolean  @default(false)
+  
+  senderId    String
+  sender      User     @relation(fields: [senderId], references: [id])
+  
+  attachments Json?
+  
+  createdAt   DateTime @default(now())
+  
+  @@map("ticket_messages")
+}
+
+model SLA {
+  id                    String   @id @default(uuid())
+  name                  String
+  description           String?
+  
+  firstResponseMinutes  Int      // Time to first response
+  resolutionMinutes     Int      // Time to resolution
+  
+  priority              TicketPriority
+  isDefault             Boolean  @default(false)
+  isActive              Boolean  @default(true)
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  
+  // Relations
+  tickets               Ticket[]
+  
+  @@map("slas")
+}
+
+// ============================================================================
+// USAGE & ANALYTICS
+// ============================================================================
+
+model UsageRecord {
+  id            String   @id @default(uuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  resourceType  String   // 'messages', 'ai_tokens', 'storage'
+  period        String   // 'YYYY-MM'
+  usageCount    BigInt   @default(0)
+  limitCount    BigInt
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@unique([tenantId, resourceType, period])
+  @@map("usage_records")
+}
+
+model MediaFile {
+  id              String   @id @default(uuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messageId       String?
+  message         Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  
+  fileType        String   // 'image', 'audio', 'video', 'document'
+  mimeType        String
+  originalFilename String?
+  fileSizeBytes   BigInt
+  
+  storageProvider String   @default("local") // 'local', 's3'
+  storagePath     String
+  storageUrl      String?
+  
+  thumbnailPath   String?
+  durationSeconds Int?     // for audio/video
+  
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime?
+  deletedAt       DateTime?
+  
+  @@map("media_files")
+}
+
+// ============================================================================
+// WEBHOOKS & EVENTS
+// ============================================================================
+
+model WebhookEvent {
+  id              String   @id @default(uuid())
+  provider        String   // 'evolution', 'stripe', 'asaas', 'google'
+  idempotencyKey  String
+  eventType       String
+  payload         Json
+  
+  status          WebhookStatus @default(pending)
+  processedAt     DateTime?
+  errorMessage    String?
+  retryCount      Int      @default(0)
+  
+  createdAt       DateTime @default(now())
+  
+  @@unique([provider, idempotencyKey])
+  @@map("webhook_events")
+}
+
+enum WebhookStatus {
+  pending
+  processed
+  failed
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model Notification {
+  id          String           @id @default(uuid())
+  tenantId    String?
+  tenant      Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type        NotificationType
+  title       String
+  message     String
+  data        Json?
+  
+  readAt      DateTime?
+  
+  createdAt   DateTime         @default(now())
+  
+  @@map("notifications")
+}
+
+enum NotificationType {
+  info
+  warning
+  error
+  success
+  message
+  billing
+  system
+}
+
+// ============================================================================
+// AUDIT LOG
+// ============================================================================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  action      String
+  entity      String
+  entityId    String?
+  
+  oldValue    Json?
+  newValue    Json?
+  
+  ipAddress   String?
+  userAgent   String?
+  
+  createdAt   DateTime @default(now())
+  
+  @@map("audit_logs")
+}
