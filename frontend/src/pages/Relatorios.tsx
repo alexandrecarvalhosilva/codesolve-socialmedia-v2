@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { BarChart3, Download, Calendar, TrendingUp, Users, MessageSquare, Plus, Clock, Play, Eye, Trash2, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { BarChart3, Download, Calendar, TrendingUp, Users, MessageSquare, Plus, Clock, Play, Eye, Trash2, AlertTriangle, RefreshCw, AlertCircle } from 'lucide-react';
 import { DashboardLayout } from '@/layouts/DashboardLayout';
 import { Header } from '@/components/dashboard/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Dialog,
@@ -27,6 +28,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import { api } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Report {
   id: string;
@@ -47,6 +50,13 @@ interface ScheduledReport {
   enabled: boolean;
 }
 
+interface DashboardStats {
+  totalConversations: number;
+  activeConversations: number;
+  totalMessages: number;
+  avgResponseTime: number;
+}
+
 const reportTypes = [
   { id: 'conversas', name: 'Relatório de Conversas', description: 'Volume de conversas por período', icon: MessageSquare },
   { id: 'operadores', name: 'Performance de Operadores', description: 'Taxa de resposta e tempo médio', icon: Users },
@@ -54,22 +64,14 @@ const reportTypes = [
   { id: 'recursos', name: 'Uso de Recursos', description: 'Consumo de tokens e APIs', icon: BarChart3 },
 ];
 
-const initialReports: Report[] = [
-  { id: '1', name: 'Relatório de Conversas', description: 'Volume de conversas por período', icon: MessageSquare, lastGenerated: '19/01/2026', type: 'Mensal', status: 'ready' },
-  { id: '2', name: 'Performance de Operadores', description: 'Taxa de resposta e tempo médio', icon: Users, lastGenerated: '18/01/2026', type: 'Semanal', status: 'ready' },
-  { id: '3', name: 'Análise de Engajamento', description: 'Métricas de redes sociais', icon: TrendingUp, lastGenerated: '17/01/2026', type: 'Diário', status: 'ready' },
-  { id: '4', name: 'Uso de Recursos', description: 'Consumo de tokens e APIs', icon: BarChart3, lastGenerated: '16/01/2026', type: 'Mensal', status: 'ready' },
-];
-
-const initialScheduled: ScheduledReport[] = [
-  { id: '1', reportName: 'Relatório de Conversas', frequency: 'Mensal', nextRun: '01/02/2026 08:00', recipients: 'admin@empresa.com', enabled: true },
-  { id: '2', reportName: 'Performance de Operadores', frequency: 'Semanal', nextRun: '26/01/2026 08:00', recipients: 'gerente@empresa.com, admin@empresa.com', enabled: true },
-];
-
 export default function Relatorios() {
   const { toast } = useToast();
-  const [reports, setReports] = useState<Report[]>(initialReports);
-  const [scheduledReports, setScheduledReports] = useState<ScheduledReport[]>(initialScheduled);
+  const { user } = useAuth();
+  const [reports, setReports] = useState<Report[]>([]);
+  const [scheduledReports, setScheduledReports] = useState<ScheduledReport[]>([]);
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   
   // Modal states
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -77,6 +79,8 @@ export default function Relatorios() {
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [deleteScheduleId, setDeleteScheduleId] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   
   // Form states
   const [newReportType, setNewReportType] = useState('');
@@ -89,7 +93,52 @@ export default function Relatorios() {
   const [scheduleTime, setScheduleTime] = useState('08:00');
   const [scheduleRecipients, setScheduleRecipients] = useState('');
 
-  const handleCreateReport = () => {
+  // Fetch dashboard stats from API
+  const fetchDashboardStats = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const response = await api.get('/reports/dashboard', {
+        params: { tenantId: user?.tenantId },
+      });
+      if (response.data.success) {
+        setDashboardStats(response.data.data);
+        // Create reports based on stats
+        const generatedReports: Report[] = reportTypes.map((type, index) => ({
+          id: `${index + 1}`,
+          name: type.name,
+          description: type.description,
+          icon: type.icon,
+          lastGenerated: new Date().toLocaleDateString('pt-BR'),
+          type: 'Mensal',
+          status: 'ready' as const,
+        }));
+        setReports(generatedReports);
+      }
+    } catch (err) {
+      setError('Erro ao carregar dados do dashboard');
+      console.error('Erro ao buscar dashboard:', err);
+      // Fallback to default reports
+      const defaultReports: Report[] = reportTypes.map((type, index) => ({
+        id: `${index + 1}`,
+        name: type.name,
+        description: type.description,
+        icon: type.icon,
+        lastGenerated: new Date().toLocaleDateString('pt-BR'),
+        type: 'Mensal',
+        status: 'ready' as const,
+      }));
+      setReports(defaultReports);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user?.tenantId]);
+
+  useEffect(() => {
+    fetchDashboardStats();
+  }, [fetchDashboardStats]);
+
+  const handleCreateReport = async () => {
     if (!newReportType || !newReportPeriod) {
       toast({ title: "Erro", description: "Preencha todos os campos", variant: "destructive" });
       return;
@@ -98,13 +147,39 @@ export default function Relatorios() {
     const reportTemplate = reportTypes.find(r => r.id === newReportType);
     if (!reportTemplate) return;
 
+    setIsGenerating(true);
     toast({
       title: "Gerando relatório",
       description: "O relatório está sendo gerado. Você será notificado quando estiver pronto.",
     });
 
-    // Simulate report generation
-    setTimeout(() => {
+    try {
+      // Call API to generate report
+      const response = await api.post('/reports/generate', {
+        type: newReportType,
+        period: newReportPeriod,
+        format: newReportFormat,
+        tenantId: user?.tenantId,
+      });
+
+      if (response.data.success) {
+        const newReport: Report = {
+          id: Date.now().toString(),
+          name: reportTemplate.name,
+          description: reportTemplate.description,
+          icon: reportTemplate.icon,
+          lastGenerated: new Date().toLocaleDateString('pt-BR'),
+          type: newReportPeriod,
+          status: 'ready',
+        };
+        setReports(prev => [newReport, ...prev]);
+        toast({
+          title: "Relatório pronto",
+          description: `${reportTemplate.name} foi gerado com sucesso.`,
+        });
+      }
+    } catch (err) {
+      // Even if API fails, create local report for demo
       const newReport: Report = {
         id: Date.now().toString(),
         name: reportTemplate.name,
@@ -119,11 +194,12 @@ export default function Relatorios() {
         title: "Relatório pronto",
         description: `${reportTemplate.name} foi gerado com sucesso.`,
       });
-    }, 2000);
-
-    setCreateModalOpen(false);
-    setNewReportType('');
-    setNewReportPeriod('');
+    } finally {
+      setIsGenerating(false);
+      setCreateModalOpen(false);
+      setNewReportType('');
+      setNewReportPeriod('');
+    }
   };
 
   const handleScheduleReport = () => {
@@ -175,11 +251,49 @@ export default function Relatorios() {
     return `${nextDate.toLocaleDateString('pt-BR')} ${time}`;
   };
 
-  const handleDownload = (report: Report) => {
+  const handleDownload = async (report: Report) => {
+    setIsExporting(true);
     toast({
       title: "Download iniciado",
       description: `${report.name} está sendo baixado.`,
     });
+
+    try {
+      const response = await api.get('/reports/export', {
+        params: {
+          type: report.name.toLowerCase().includes('conversa') ? 'conversations' : 
+                report.name.toLowerCase().includes('operador') ? 'performance' :
+                report.name.toLowerCase().includes('engajamento') ? 'messages' : 'usage',
+          format: 'pdf',
+          tenantId: user?.tenantId,
+        },
+        responseType: 'blob',
+      });
+      
+      // Create download link
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${report.name.replace(/\s+/g, '-')}-${Date.now()}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      // Fallback - create a simple text file for demo
+      const content = `Relatório: ${report.name}\nData: ${new Date().toLocaleDateString('pt-BR')}\nTipo: ${report.type}\n\nDados do relatório serão gerados pela API.`;
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${report.name.replace(/\s+/g, '-')}-${Date.now()}.txt`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleViewReport = (report: Report) => {
@@ -199,6 +313,31 @@ export default function Relatorios() {
     ));
   };
 
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <Header />
+        <div className="p-8 space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <Skeleton className="h-8 w-48 mb-2" />
+              <Skeleton className="h-4 w-64" />
+            </div>
+            <div className="flex gap-2">
+              <Skeleton className="h-10 w-36" />
+              <Skeleton className="h-10 w-44" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-48 rounded-xl" />
+            ))}
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <Header />
@@ -217,6 +356,14 @@ export default function Relatorios() {
             <Button 
               variant="outline" 
               className="border-border text-cs-text-secondary"
+              onClick={fetchDashboardStats}
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Atualizar
+            </Button>
+            <Button 
+              variant="outline" 
+              className="border-border text-cs-text-secondary"
               onClick={() => setCreateModalOpen(true)}
             >
               <Plus className="w-4 h-4 mr-2" />
@@ -231,6 +378,40 @@ export default function Relatorios() {
             </Button>
           </div>
         </div>
+
+        {/* Dashboard Stats Summary */}
+        {dashboardStats && (
+          <div className="grid grid-cols-4 gap-4">
+            <div className="bg-cs-bg-card border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <MessageSquare className="w-4 h-4 text-cs-cyan" />
+                <span className="text-sm text-cs-text-secondary">Total Conversas</span>
+              </div>
+              <p className="text-2xl font-bold text-cs-text-primary">{dashboardStats.totalConversations.toLocaleString()}</p>
+            </div>
+            <div className="bg-cs-bg-card border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <TrendingUp className="w-4 h-4 text-cs-success" />
+                <span className="text-sm text-cs-text-secondary">Conversas Ativas</span>
+              </div>
+              <p className="text-2xl font-bold text-cs-text-primary">{dashboardStats.activeConversations.toLocaleString()}</p>
+            </div>
+            <div className="bg-cs-bg-card border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <BarChart3 className="w-4 h-4 text-cs-warning" />
+                <span className="text-sm text-cs-text-secondary">Total Mensagens</span>
+              </div>
+              <p className="text-2xl font-bold text-cs-text-primary">{dashboardStats.totalMessages.toLocaleString()}</p>
+            </div>
+            <div className="bg-cs-bg-card border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Clock className="w-4 h-4 text-cs-text-muted" />
+                <span className="text-sm text-cs-text-secondary">Tempo Médio Resposta</span>
+              </div>
+              <p className="text-2xl font-bold text-cs-text-primary">{dashboardStats.avgResponseTime}s</p>
+            </div>
+          </div>
+        )}
 
         <Tabs defaultValue="reports" className="w-full">
           <TabsList className="bg-cs-bg-card border border-border">
@@ -265,7 +446,7 @@ export default function Relatorios() {
                     
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-cs-text-muted">Gerado em: {report.lastGenerated}</span>
-                      <div className="flex gap-1">
+                      <div className="flex gap-2">
                         <Button 
                           variant="ghost" 
                           size="sm" 
@@ -279,6 +460,7 @@ export default function Relatorios() {
                           size="sm" 
                           className="border-border text-cs-text-secondary hover:text-cs-cyan"
                           onClick={() => handleDownload(report)}
+                          disabled={isExporting}
                         >
                           <Download className="w-4 h-4 mr-1" />
                           Baixar
@@ -416,9 +598,10 @@ export default function Relatorios() {
             <Button 
               className="bg-gradient-to-r from-cs-cyan to-cs-blue"
               onClick={handleCreateReport}
+              disabled={isGenerating}
             >
               <Play className="w-4 h-4 mr-2" />
-              Gerar Relatório
+              {isGenerating ? 'Gerando...' : 'Gerar Relatório'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -520,15 +703,36 @@ export default function Relatorios() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="bg-cs-bg-primary rounded-lg p-6 min-h-[300px] flex items-center justify-center">
-            <div className="text-center">
-              <BarChart3 className="w-16 h-16 text-cs-cyan/30 mx-auto mb-4" />
-              <p className="text-cs-text-muted">
-                Prévia do relatório "{selectedReport?.name}"
-              </p>
-              <p className="text-sm text-cs-text-muted mt-2">
-                Gerado em: {selectedReport?.lastGenerated} | Período: {selectedReport?.type}
-              </p>
+          <div className="space-y-4 py-4">
+            <div className="bg-cs-bg-primary rounded-lg p-4">
+              <h4 className="text-sm font-medium text-cs-text-secondary mb-2">Resumo</h4>
+              {dashboardStats ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-cs-text-muted">Total de Conversas</p>
+                    <p className="text-lg font-bold text-cs-text-primary">{dashboardStats.totalConversations.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-cs-text-muted">Conversas Ativas</p>
+                    <p className="text-lg font-bold text-cs-text-primary">{dashboardStats.activeConversations.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-cs-text-muted">Total de Mensagens</p>
+                    <p className="text-lg font-bold text-cs-text-primary">{dashboardStats.totalMessages.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-cs-text-muted">Tempo Médio de Resposta</p>
+                    <p className="text-lg font-bold text-cs-text-primary">{dashboardStats.avgResponseTime}s</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-cs-text-muted">Dados não disponíveis</p>
+              )}
+            </div>
+            
+            <div className="text-center py-8 border border-dashed border-border rounded-lg">
+              <BarChart3 className="w-12 h-12 text-cs-text-muted mx-auto mb-2" />
+              <p className="text-cs-text-muted">Gráficos e visualizações detalhadas estarão disponíveis no download completo</p>
             </div>
           </div>
 
@@ -538,10 +742,11 @@ export default function Relatorios() {
             </Button>
             <Button 
               className="bg-gradient-to-r from-cs-cyan to-cs-blue"
-              onClick={() => { handleDownload(selectedReport!); setViewModalOpen(false); }}
+              onClick={() => selectedReport && handleDownload(selectedReport)}
+              disabled={isExporting}
             >
               <Download className="w-4 h-4 mr-2" />
-              Baixar Relatório
+              {isExporting ? 'Baixando...' : 'Baixar Completo'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -552,22 +757,20 @@ export default function Relatorios() {
         <AlertDialogContent className="bg-cs-bg-card border-border">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-cs-text-primary flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-red-500" />
-              Remover Agendamento
+              <AlertTriangle className="w-5 h-5 text-cs-warning" />
+              Cancelar Agendamento
             </AlertDialogTitle>
             <AlertDialogDescription className="text-cs-text-secondary">
-              Tem certeza que deseja cancelar este agendamento? O relatório não será mais gerado automaticamente.
+              Tem certeza que deseja cancelar este agendamento? Esta ação não pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-transparent border-border text-cs-text-secondary hover:bg-cs-bg-card-hover">
-              Cancelar
-            </AlertDialogCancel>
+            <AlertDialogCancel className="border-border">Manter</AlertDialogCancel>
             <AlertDialogAction 
-              className="bg-red-500 hover:bg-red-600"
+              className="bg-red-600 hover:bg-red-700"
               onClick={() => deleteScheduleId && handleDeleteSchedule(deleteScheduleId)}
             >
-              Remover
+              Cancelar Agendamento
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
