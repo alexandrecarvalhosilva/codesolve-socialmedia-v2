@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Notification, NotificationRole, NotificationType } from '@/types/notification';
-import { mockNotifications } from '@/data/notificationMockData';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSoundNotification } from '@/hooks/useSoundNotification';
 import { toast } from 'sonner';
@@ -9,6 +8,7 @@ import {
   getActionLogs, 
   NotificationActionLog 
 } from '@/types/notificationActionLog';
+import { api } from '@/lib/api';
 
 interface NotificationContextType {
   notifications: Notification[];
@@ -26,87 +26,42 @@ interface NotificationContextType {
   isPolling: boolean;
   setPollingEnabled: (enabled: boolean) => void;
   actionLogs: NotificationActionLog[];
+  isLoading: boolean;
+  refetch: () => void;
 }
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
-// Simulated new notifications that will "arrive" during polling
-const simulatedIncomingNotifications: Omit<Notification, 'id' | 'timestamp' | 'read'>[] = [
-  {
-    type: 'chat_unread',
-    origin: 'chat',
-    priority: 'info',
-    title: 'Nova mensagem no chat',
-    message: 'Cliente João enviou uma mensagem no WhatsApp.',
-    linkTo: '/tenant/chat',
-    visibleTo: ['admin', 'operador'],
-    entityId: 'chat-new-001',
-    entityType: 'chat',
-    tenantId: '1',
-    tenantName: 'Test Tenant Contacts 2',
-  },
-  {
-    type: 'ticket_urgent',
-    origin: 'support',
-    priority: 'warning',
-    title: 'Ticket escalado para urgente',
-    message: 'O ticket #1250 foi escalado para prioridade crítica.',
-    linkTo: '/support',
-    visibleTo: ['superadmin', 'admin', 'operador'],
-    entityId: 'ticket-1250',
-    entityType: 'ticket',
-    tenantId: '2',
-    tenantName: 'Other RAG Tenant',
-  },
-  {
-    type: 'sla_breach',
-    origin: 'support',
-    priority: 'critical',
-    title: 'SLA Violado - Ticket #1255',
-    message: 'Tempo de primeira resposta excedido. Cliente: Test RAG Tenant',
-    linkTo: '/support',
-    visibleTo: ['superadmin', 'admin'],
-    entityId: 'ticket-1255',
-    entityType: 'ticket',
-    tenantId: '5',
-    tenantName: 'Test RAG Tenant',
-  },
-  {
-    type: 'payment_overdue',
-    origin: 'billing',
-    priority: 'critical',
-    title: 'Novo pagamento atrasado',
-    message: 'Fatura #INV-2025-010 venceu hoje. Tenant: Test Tenant Lists',
-    linkTo: '/billing/invoices',
-    visibleTo: ['superadmin'],
-    entityId: 'inv-010',
-    entityType: 'invoice',
-    tenantId: '4',
-    tenantName: 'Test Tenant Lists',
-  },
-  {
-    type: 'ticket_new',
-    origin: 'support',
-    priority: 'info',
-    title: 'Novo ticket recebido',
-    message: 'Solicitação de suporte técnico para integração.',
-    linkTo: '/tenant/support',
-    visibleTo: ['admin', 'operador'],
-    entityId: 'ticket-1260',
-    entityType: 'ticket',
-    tenantId: '1',
-    tenantName: 'Test Tenant Contacts 2',
-  },
-];
-
 const POLLING_INTERVAL = 30000; // 30 seconds
-const SIMULATION_CHANCE = 0.3; // 30% chance of new notification per poll
+
+// Mapear notificações da API para o formato do frontend
+const mapApiNotification = (apiNotification: any): Notification => {
+  return {
+    id: apiNotification.id,
+    type: apiNotification.category as NotificationType,
+    origin: apiNotification.category,
+    priority: apiNotification.type === 'error' ? 'critical' : 
+              apiNotification.type === 'warning' ? 'warning' : 'info',
+    title: apiNotification.title,
+    message: apiNotification.message,
+    timestamp: new Date(apiNotification.createdAt),
+    read: apiNotification.isRead,
+    linkTo: apiNotification.actionUrl || undefined,
+    visibleTo: ['superadmin', 'admin', 'operador', 'visualizador'] as NotificationRole[],
+    entityId: apiNotification.id,
+    entityType: apiNotification.category,
+    tenantId: apiNotification.tenantId || undefined,
+    tenantName: undefined,
+    resolved: false,
+  };
+};
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
-  const { playSound, isMuted } = useSoundNotification();
+  const { user, isAuthenticated } = useAuth();
+  const { playSound } = useSoundNotification();
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [isPolling, setIsPolling] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isPolling, setIsPolling] = useState(true);
   const [mutedTypes, setMutedTypes] = useState<NotificationType[]>(() => {
     const stored = localStorage.getItem('notification-muted-types');
     if (stored) {
@@ -119,7 +74,6 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     return [];
   });
   const [actionLogs, setActionLogs] = useState<NotificationActionLog[]>([]);
-  const simulationIndexRef = useRef(0);
   const lastCriticalCountRef = useRef(0);
 
   const userRole = (user?.role || 'visualizador') as NotificationRole;
@@ -139,10 +93,33 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     setActionLogs(getActionLogs());
   }, []);
 
-  // Initialize with mock data
+  // Fetch notifications from API
+  const fetchNotifications = useCallback(async () => {
+    if (!isAuthenticated) return;
+    
+    try {
+      setIsLoading(true);
+      const response = await api.get('/notifications', {
+        params: { limit: 50 }
+      });
+      
+      if (response.data.success && response.data.data) {
+        const mappedNotifications = response.data.data.map(mapApiNotification);
+        setNotifications(mappedNotifications);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar notificações:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isAuthenticated]);
+
+  // Initialize with API data
   useEffect(() => {
-    setNotifications(mockNotifications);
-  }, []);
+    if (isAuthenticated) {
+      fetchNotifications();
+    }
+  }, [isAuthenticated, fetchNotifications]);
 
   // Persist muted types to localStorage
   useEffect(() => {
@@ -168,7 +145,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     lastCriticalCountRef.current = criticalCount;
   }, [criticalCount, unreadCount, playSound, userNotifications]);
 
-  // Add a new notification
+  // Add a new notification (local only - for real-time events)
   const addNotification = useCallback((notification: Omit<Notification, 'id' | 'timestamp' | 'read'>) => {
     const newNotification: Notification = {
       ...notification,
@@ -181,97 +158,128 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     console.log('[Notifications] New notification added:', newNotification.title);
   }, []);
 
-  // Mark single notification as read (with logging)
-  const markAsRead = useCallback((id: string) => {
+  // Mark single notification as read (with API call)
+  const markAsRead = useCallback(async (id: string) => {
     const notification = notifications.find(n => n.id === id);
     if (notification && !notification.read) {
-      logNotificationAction('read', id, {
-        id: user?.id,
-        name: user?.name,
-        role: user?.role,
-      }, `Notificação "${notification.title}" marcada como lida`, notification.type);
-      refreshActionLogs();
+      try {
+        await api.post(`/notifications/${id}/read`);
+        
+        logNotificationAction('read', id, {
+          id: user?.id,
+          name: user?.name,
+          role: user?.role,
+        }, `Notificação "${notification.title}" marcada como lida`, notification.type);
+        refreshActionLogs();
+        
+        setNotifications(prev => 
+          prev.map(n => n.id === id ? { ...n, read: true } : n)
+        );
+      } catch (err) {
+        console.error('Erro ao marcar notificação como lida:', err);
+      }
     }
-    
-    setNotifications(prev => 
-      prev.map(n => n.id === id ? { ...n, read: true } : n)
-    );
   }, [notifications, user, refreshActionLogs]);
 
-  // Mark all as read for current user (with logging)
-  const markAllAsRead = useCallback(() => {
-    logNotificationAction('marked_all_read', 'all', {
-      id: user?.id,
-      name: user?.name,
-      role: user?.role,
-    }, `Todas as notificações marcadas como lidas`);
-    refreshActionLogs();
-    
-    setNotifications(prev => 
-      prev.map(n => 
-        n.visibleTo.includes(userRole) ? { ...n, read: true } : n
-      )
-    );
-    toast.success('Todas as notificações marcadas como lidas');
-  }, [userRole, user, refreshActionLogs]);
-
-  // Remove notification (with logging)
-  const removeNotification = useCallback((id: string) => {
-    const notification = notifications.find(n => n.id === id);
-    if (notification) {
-      logNotificationAction('deleted', id, {
+  // Mark all as read for current user (with API call)
+  const markAllAsRead = useCallback(async () => {
+    try {
+      await api.post('/notifications/read-all');
+      
+      logNotificationAction('marked_all_read', 'all', {
         id: user?.id,
         name: user?.name,
         role: user?.role,
-      }, `Notificação "${notification.title}" excluída`, notification.type);
-      refreshActionLogs();
-    }
-    
-    setNotifications(prev => prev.filter(n => n.id !== id));
-  }, [notifications, user, refreshActionLogs]);
-
-  // Dismiss notification (keeps in history but removes from active list)
-  const dismissNotification = useCallback((id: string, reason?: string) => {
-    const notification = notifications.find(n => n.id === id);
-    if (notification) {
-      logNotificationAction('dismissed', id, {
-        id: user?.id,
-        name: user?.name,
-        role: user?.role,
-      }, reason || `Notificação "${notification.title}" dispensada`, notification.type);
+      }, `Todas as notificações marcadas como lidas`);
       refreshActionLogs();
       
       setNotifications(prev => 
-        prev.map(n => n.id === id ? { ...n, resolved: true, read: true } : n)
+        prev.map(n => 
+          n.visibleTo.includes(userRole) ? { ...n, read: true } : n
+        )
       );
-      
-      toast.success('Notificação dispensada');
+      toast.success('Todas as notificações marcadas como lidas');
+    } catch (err) {
+      console.error('Erro ao marcar todas como lidas:', err);
+      toast.error('Erro ao marcar notificações como lidas');
+    }
+  }, [userRole, user, refreshActionLogs]);
+
+  // Remove notification (with API call)
+  const removeNotification = useCallback(async (id: string) => {
+    const notification = notifications.find(n => n.id === id);
+    if (notification) {
+      try {
+        await api.delete(`/notifications/${id}`);
+        
+        logNotificationAction('deleted', id, {
+          id: user?.id,
+          name: user?.name,
+          role: user?.role,
+        }, `Notificação "${notification.title}" excluída`, notification.type);
+        refreshActionLogs();
+        
+        setNotifications(prev => prev.filter(n => n.id !== id));
+      } catch (err) {
+        console.error('Erro ao excluir notificação:', err);
+        toast.error('Erro ao excluir notificação');
+      }
+    }
+  }, [notifications, user, refreshActionLogs]);
+
+  // Dismiss notification (keeps in history but removes from active list)
+  const dismissNotification = useCallback(async (id: string, reason?: string) => {
+    const notification = notifications.find(n => n.id === id);
+    if (notification) {
+      try {
+        await api.post(`/notifications/${id}/read`);
+        
+        logNotificationAction('dismissed', id, {
+          id: user?.id,
+          name: user?.name,
+          role: user?.role,
+        }, reason || `Notificação "${notification.title}" dispensada`, notification.type);
+        refreshActionLogs();
+        
+        setNotifications(prev => 
+          prev.map(n => n.id === id ? { ...n, resolved: true, read: true } : n)
+        );
+        
+        toast.success('Notificação dispensada');
+      } catch (err) {
+        console.error('Erro ao dispensar notificação:', err);
+      }
     }
   }, [notifications, user, refreshActionLogs]);
 
   // Resolve notification (mark as handled/resolved)
-  const resolveNotification = useCallback((id: string) => {
+  const resolveNotification = useCallback(async (id: string) => {
     const notification = notifications.find(n => n.id === id);
     if (notification) {
-      logNotificationAction('resolved', id, {
-        id: user?.id,
-        name: user?.name,
-        role: user?.role,
-      }, `Notificação "${notification.title}" marcada como resolvida`, notification.type);
-      refreshActionLogs();
-      
-      setNotifications(prev => 
-        prev.map(n => n.id === id ? { ...n, resolved: true, read: true } : n)
-      );
-      
-      toast.success('Notificação marcada como resolvida');
+      try {
+        await api.post(`/notifications/${id}/read`);
+        
+        logNotificationAction('resolved', id, {
+          id: user?.id,
+          name: user?.name,
+          role: user?.role,
+        }, `Notificação "${notification.title}" marcada como resolvida`, notification.type);
+        refreshActionLogs();
+        
+        setNotifications(prev => 
+          prev.map(n => n.id === id ? { ...n, resolved: true, read: true } : n)
+        );
+        
+        toast.success('Notificação marcada como resolvida');
+      } catch (err) {
+        console.error('Erro ao resolver notificação:', err);
+      }
     }
   }, [notifications, user, refreshActionLogs]);
 
   // Mute a notification type (with logging)
   const muteNotificationType = useCallback((type: NotificationType) => {
     setMutedTypes(prev => {
-      // Prevent duplicates
       if (prev.includes(type)) return prev;
       
       logNotificationAction('muted_type', type, {
@@ -299,30 +307,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     toast.success('Tipo de notificação reativado');
   }, [user, refreshActionLogs]);
 
-  // Polling simulation
+  // Polling for new notifications
   useEffect(() => {
-    if (!isPolling) return;
+    if (!isPolling || !isAuthenticated) return;
 
     const pollInterval = setInterval(() => {
-      if (Math.random() < SIMULATION_CHANCE) {
-        const nextNotification = simulatedIncomingNotifications[
-          simulationIndexRef.current % simulatedIncomingNotifications.length
-        ];
-        
-        // Only add if visible to current user and type not muted
-        if (nextNotification.visibleTo.includes(userRole) && !mutedTypes.includes(nextNotification.type)) {
-          addNotification(nextNotification);
-          // Polling simulation - remove in production
-        }
-        
-        simulationIndexRef.current++;
-      }
+      fetchNotifications();
     }, POLLING_INTERVAL);
 
     return () => {
       clearInterval(pollInterval);
     };
-  }, [isPolling, userRole, addNotification, mutedTypes]);
+  }, [isPolling, isAuthenticated, fetchNotifications]);
 
   const setPollingEnabled = useCallback((enabled: boolean) => {
     setIsPolling(enabled);
@@ -346,6 +342,8 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         isPolling,
         setPollingEnabled,
         actionLogs,
+        isLoading,
+        refetch: fetchNotifications,
       }}
     >
       {children}
