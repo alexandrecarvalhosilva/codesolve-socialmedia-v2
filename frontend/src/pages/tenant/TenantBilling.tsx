@@ -1,7 +1,9 @@
+import { useState, useEffect } from 'react';
 import { TenantLayout } from '@/layouts/TenantLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { 
   CreditCard, 
   TrendingUp, 
@@ -11,32 +13,160 @@ import {
   Calendar,
   Zap,
   History,
-  Wallet
+  RefreshCw
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { StatusBadge } from '@/components/billing/StatusBadge';
 import { UsageProgressBar } from '@/components/billing/UsageProgressBar';
-import { mockSubscriptions, mockInvoices, mockPlans } from '@/data/billingMockData';
-import { formatPrice } from '@/types/billing';
-import { getTenantCreditBalance } from '@/data/planChangeHistoryMock';
+import { useAuth } from '@/contexts/AuthContext';
+import { api } from '@/lib/api';
+import type { Subscription, Invoice, BillingPlan } from '@/lib/apiTypes';
+
+// Tipos locais para dados adicionais
+interface SubscriptionWithUsage extends Subscription {
+  usage?: {
+    messagesUsed: number;
+    messagesLimit: number;
+    usersUsed: number;
+    usersLimit: number;
+    instancesUsed: number;
+    instancesLimit: number;
+  };
+}
+
+const formatPrice = (value: number) => {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(value / 100);
+};
+
+const formatDate = (dateStr: string) => {
+  return new Date(dateStr).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  });
+};
 
 export default function TenantBilling() {
-  // Simula a assinatura do tenant atual
-  const subscription = mockSubscriptions[0];
-  const plan = mockPlans.find(p => p.id === subscription.planId);
-  const pendingInvoices = mockInvoices.filter(
-    inv => inv.tenantId === subscription.tenantId && inv.status === 'pending'
-  );
-  const lastPaidInvoice = mockInvoices.find(
-    inv => inv.tenantId === subscription.tenantId && inv.status === 'paid'
-  );
+  const { user } = useAuth();
+  const [subscription, setSubscription] = useState<SubscriptionWithUsage | null>(null);
+  const [plan, setPlan] = useState<BillingPlan | null>(null);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [pendingInvoices, setPendingInvoices] = useState<Invoice[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
+  const fetchBillingData = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      // Buscar assinatura do tenant atual
+      const subscriptionResponse = await api.get('/billing/subscriptions', {
+        params: { tenantId: user?.tenantId, limit: 1 }
+      });
+
+      if (subscriptionResponse.data.success && subscriptionResponse.data.data?.length > 0) {
+        const sub = subscriptionResponse.data.data[0];
+        setSubscription(sub);
+
+        // Buscar detalhes do plano
+        if (sub.planId) {
+          const plansResponse = await api.get('/billing/plans');
+          if (plansResponse.data.success) {
+            const foundPlan = plansResponse.data.data?.find((p: BillingPlan) => p.id === sub.planId);
+            setPlan(foundPlan || null);
+          }
+        }
+      }
+
+      // Buscar faturas
+      const invoicesResponse = await api.get('/billing/invoices', {
+        params: { tenantId: user?.tenantId, limit: 10 }
+      });
+
+      if (invoicesResponse.data.success) {
+        const allInvoices = invoicesResponse.data.data || [];
+        setInvoices(allInvoices);
+        setPendingInvoices(allInvoices.filter((inv: Invoice) => inv.status === 'pending' || inv.status === 'overdue'));
+      }
+
+    } catch (err) {
+      console.error('Erro ao carregar dados de billing:', err);
+      setError('Erro ao carregar dados de cobrança');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.tenantId) {
+      fetchBillingData();
+    }
+  }, [user?.tenantId]);
+
+  if (isLoading) {
+    return (
+      <TenantLayout>
+        <div className="p-6 space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <Skeleton className="h-8 w-48" />
+              <Skeleton className="h-4 w-64 mt-2" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[1, 2, 3].map((i) => (
+              <Card key={i} className="bg-cs-bg-card border-border">
+                <CardHeader className="pb-3">
+                  <Skeleton className="h-6 w-32" />
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </TenantLayout>
+    );
+  }
+
+  if (error) {
+    return (
+      <TenantLayout>
+        <div className="p-6">
+          <Card className="border-destructive bg-destructive/10">
+            <CardContent className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+                <div>
+                  <p className="font-medium text-foreground">{error}</p>
+                  <p className="text-sm text-muted-foreground">Tente novamente mais tarde</p>
+                </div>
+              </div>
+              <Button onClick={fetchBillingData} variant="outline">
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Tentar Novamente
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </TenantLayout>
+    );
+  }
+
+  // Uso padrão se não houver dados
+  const usage = subscription?.usage || {
+    messagesUsed: 0,
+    messagesLimit: 1000,
+    usersUsed: 1,
+    usersLimit: 5,
+    instancesUsed: 0,
+    instancesLimit: 1,
   };
 
   return (
@@ -48,6 +178,10 @@ export default function TenantBilling() {
             <h1 className="text-2xl font-bold text-foreground">Cobrança</h1>
             <p className="text-muted-foreground">Gerencie sua assinatura e pagamentos</p>
           </div>
+          <Button onClick={fetchBillingData} variant="outline" size="sm">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Atualizar
+          </Button>
         </div>
 
         {/* Alerta de fatura pendente */}
@@ -61,7 +195,7 @@ export default function TenantBilling() {
                     Você tem {pendingInvoices.length} fatura(s) pendente(s)
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Total: {formatPrice(pendingInvoices.reduce((acc, inv) => acc + inv.total, 0))}
+                    Total: {formatPrice(pendingInvoices.reduce((acc, inv) => acc + inv.amount, 0))}
                   </p>
                 </div>
               </div>
@@ -79,7 +213,9 @@ export default function TenantBilling() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg">Plano Atual</CardTitle>
-                <StatusBadge status={subscription.status} type="subscription" size="sm" />
+                {subscription && (
+                  <StatusBadge status={subscription.status} type="subscription" size="sm" />
+                )}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -88,18 +224,22 @@ export default function TenantBilling() {
                   <Zap className="h-6 w-6 text-primary" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-foreground">{plan?.name}</p>
+                  <p className="text-2xl font-bold text-foreground">
+                    {plan?.name || subscription?.planName || 'Sem plano'}
+                  </p>
                   <p className="text-sm text-muted-foreground">
-                    {formatPrice(plan?.basePrice || 0)}/mês
+                    {plan ? formatPrice(plan.priceMonthly) + '/mês' : 'Gratuito'}
                   </p>
                 </div>
               </div>
-              <div className="pt-2 border-t border-border">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Calendar className="h-4 w-4" />
-                  <span>Próxima cobrança: {formatDate(subscription.currentPeriodEnd)}</span>
+              {subscription && (
+                <div className="pt-2 border-t border-border">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Calendar className="h-4 w-4" />
+                    <span>Próxima cobrança: {formatDate(subscription.currentPeriodEnd)}</span>
+                  </div>
                 </div>
-              </div>
+              )}
               <Button asChild variant="outline" className="w-full">
                 <Link to="/tenant/billing/plans" className="flex items-center justify-between">
                   Alterar Plano
@@ -120,20 +260,20 @@ export default function TenantBilling() {
             <CardContent className="space-y-4">
               <UsageProgressBar
                 label="Mensagens"
-                used={subscription.usage.messagesUsed}
-                limit={subscription.usage.messagesLimit}
+                used={usage.messagesUsed}
+                limit={usage.messagesLimit}
               />
               <UsageProgressBar
                 label="Usuários"
-                used={subscription.usage.usersUsed}
-                limit={subscription.usage.usersLimit}
+                used={usage.usersUsed}
+                limit={usage.usersLimit}
               />
               <UsageProgressBar
                 label="Instâncias"
-                used={subscription.usage.instancesUsed}
-                limit={subscription.usage.instancesLimit}
+                used={usage.instancesUsed}
+                limit={usage.instancesLimit}
               />
-              {subscription.usage.messagesUsed / (subscription.usage.messagesLimit || 1) >= 0.8 && (
+              {usage.messagesUsed / (usage.messagesLimit || 1) >= 0.8 && (
                 <Button asChild variant="default" className="w-full bg-cs-cyan hover:bg-cs-cyan/90">
                   <Link to="/tenant/billing/plans">
                     Aumentar Limites
@@ -183,11 +323,14 @@ export default function TenantBilling() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {mockInvoices
-                .filter(inv => inv.tenantId === subscription.tenantId)
-                .slice(0, 3)
-                .map((invoice) => (
+            {invoices.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                <CreditCard className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Nenhuma fatura encontrada</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {invoices.slice(0, 3).map((invoice) => (
                   <div 
                     key={invoice.id}
                     className="flex items-center justify-between p-3 bg-cs-bg-primary rounded-lg"
@@ -197,7 +340,9 @@ export default function TenantBilling() {
                         <CreditCard className="h-4 w-4 text-muted-foreground" />
                       </div>
                       <div>
-                        <p className="font-medium text-foreground">{invoice.invoiceNumber}</p>
+                        <p className="font-medium text-foreground">
+                          {invoice.id.slice(0, 8).toUpperCase()}
+                        </p>
                         <p className="text-sm text-muted-foreground">
                           Vencimento: {formatDate(invoice.dueDate)}
                         </p>
@@ -205,14 +350,19 @@ export default function TenantBilling() {
                     </div>
                     <div className="flex items-center gap-4">
                       <StatusBadge status={invoice.status} type="invoice" size="sm" />
-                      <p className="font-semibold text-foreground">{formatPrice(invoice.total)}</p>
-                      <Button variant="ghost" size="icon">
-                        <Download className="h-4 w-4" />
-                      </Button>
+                      <p className="font-semibold text-foreground">{formatPrice(invoice.amount)}</p>
+                      {invoice.invoiceUrl && (
+                        <Button variant="ghost" size="icon" asChild>
+                          <a href={invoice.invoiceUrl} target="_blank" rel="noopener noreferrer">
+                            <Download className="h-4 w-4" />
+                          </a>
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ))}
-            </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
