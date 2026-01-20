@@ -11,14 +11,14 @@
 import { useCallback } from 'react';
 import { api } from '@/lib/api';
 import { useQuery, useMutation, usePaginatedQuery } from './useApi';
-import type { WhatsAppInstance, WhatsAppInstanceStatus } from '@/lib/apiTypes';
+import type { WhatsappInstance, WhatsappInstanceStatus } from '@/lib/apiTypes';
 
 // ============================================================================
 // TIPOS
 // ============================================================================
 
 interface InstancesListResponse {
-  instances: WhatsAppInstance[];
+  instances: WhatsappInstance[];
   meta: {
     page: number;
     limit: number;
@@ -28,17 +28,18 @@ interface InstancesListResponse {
 }
 
 interface InstanceResponse {
-  instance: WhatsAppInstance;
+  instance: WhatsappInstance;
 }
 
 interface QRCodeResponse {
-  qrCode: string;
+  qrCode: string | null;
+  pairingCode?: string;
   expiresAt: string;
 }
 
 interface InstanceFilters {
   tenantId?: string;
-  status?: WhatsAppInstanceStatus;
+  status?: WhatsappInstanceStatus;
   search?: string;
   page?: number;
   limit?: number;
@@ -63,7 +64,7 @@ interface UpdateInstanceData {
 /**
  * Hook para listar instâncias WhatsApp com paginação e filtros
  */
-export function useWhatsAppInstances(filters: InstanceFilters = {}) {
+export function useWhatsappInstances(filters: InstanceFilters = {}) {
   const { tenantId, status, search, page = 1, limit = 10 } = filters;
 
   const query = usePaginatedQuery<InstancesListResponse>(
@@ -93,7 +94,7 @@ export function useWhatsAppInstances(filters: InstanceFilters = {}) {
 /**
  * Hook para obter detalhes de uma instância específica
  */
-export function useWhatsAppInstance(instanceId: string | undefined) {
+export function useWhatsappInstance(instanceId: string | undefined) {
   const query = useQuery<InstanceResponse>(
     `/api/whatsapp/instances/${instanceId}`,
     undefined,
@@ -134,8 +135,8 @@ export function useWhatsAppQRCode(instanceId: string | undefined) {
 /**
  * Hook para criar uma nova instância WhatsApp
  */
-export function useCreateWhatsAppInstance(options?: {
-  onSuccess?: (instance: WhatsAppInstance) => void;
+export function useCreateWhatsappInstance(options?: {
+  onSuccess?: (instance: WhatsappInstance) => void;
   onError?: (error: Error) => void;
 }) {
   const mutation = useMutation<InstanceResponse, CreateInstanceData>(
@@ -161,8 +162,8 @@ export function useCreateWhatsAppInstance(options?: {
 /**
  * Hook para atualizar uma instância WhatsApp
  */
-export function useUpdateWhatsAppInstance(options?: {
-  onSuccess?: (instance: WhatsAppInstance) => void;
+export function useUpdateWhatsappInstance(options?: {
+  onSuccess?: (instance: WhatsappInstance) => void;
   onError?: (error: Error) => void;
 }) {
   const mutation = useMutation<InstanceResponse, { id: string; data: UpdateInstanceData }>(
@@ -189,7 +190,7 @@ export function useUpdateWhatsAppInstance(options?: {
 /**
  * Hook para deletar uma instância WhatsApp
  */
-export function useDeleteWhatsAppInstance(options?: {
+export function useDeleteWhatsappInstance(options?: {
   onSuccess?: () => void;
   onError?: (error: Error) => void;
 }) {
@@ -212,7 +213,7 @@ export function useDeleteWhatsAppInstance(options?: {
 /**
  * Hook para conectar uma instância (gerar QR Code)
  */
-export function useConnectWhatsAppInstance(options?: {
+export function useConnectWhatsappInstance(options?: {
   onSuccess?: (data: QRCodeResponse) => void;
   onError?: (error: Error) => void;
 }) {
@@ -241,7 +242,7 @@ export function useConnectWhatsAppInstance(options?: {
 /**
  * Hook para desconectar uma instância
  */
-export function useDisconnectWhatsAppInstance(options?: {
+export function useDisconnectWhatsappInstance(options?: {
   onSuccess?: () => void;
   onError?: (error: Error) => void;
 }) {
@@ -264,7 +265,7 @@ export function useDisconnectWhatsAppInstance(options?: {
 /**
  * Hook para reiniciar uma instância
  */
-export function useRestartWhatsAppInstance(options?: {
+export function useRestartWhatsappInstance(options?: {
   onSuccess?: () => void;
   onError?: (error: Error) => void;
 }) {
@@ -288,7 +289,7 @@ export function useRestartWhatsAppInstance(options?: {
  * Hook para verificar status de uma instância
  */
 export function useCheckWhatsAppStatus(options?: {
-  onSuccess?: (instance: WhatsAppInstance) => void;
+  onSuccess?: (instance: WhatsappInstance) => void;
   onError?: (error: Error) => void;
 }) {
   const mutation = useMutation<InstanceResponse, string>(
@@ -316,4 +317,4 @@ export function useCheckWhatsAppStatus(options?: {
 // EXPORT DEFAULT
 // ============================================================================
 
-export default useWhatsAppInstances;
+export default useWhatsappInstances;

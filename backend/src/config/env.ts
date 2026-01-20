@@ -22,8 +22,9 @@ export const env = {
   CORS_ORIGIN: process.env.CORS_ORIGIN || 'http://localhost:5173',
   
   // Evolution API (WhatsApp)
-  EVOLUTION_BASE_URL: process.env.EVOLUTION_BASE_URL || '',
-  EVOLUTION_GLOBAL_API_KEY: process.env.EVOLUTION_GLOBAL_API_KEY || '',
+  EVOLUTION_API_URL: process.env.EVOLUTION_API_URL || process.env.EVOLUTION_BASE_URL || 'https://api.gandhivati.com.br',
+  EVOLUTION_API_KEY: process.env.EVOLUTION_API_KEY || process.env.EVOLUTION_GLOBAL_API_KEY || '6f40d224053ebc24fbf8de801b3ab429',
+  EVOLUTION_WEBHOOK_URL: process.env.EVOLUTION_WEBHOOK_URL || '',
   
   // Google OAuth
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',

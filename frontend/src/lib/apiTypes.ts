@@ -115,13 +115,17 @@ export type WhatsappInstanceStatus = 'disconnected' | 'connecting' | 'connected'
 export interface WhatsappInstance {
   id: string;
   name: string;
+  evolutionInstanceId?: string;
   phoneNumber?: string;
   status: WhatsappInstanceStatus;
   qrCode?: string;
   tenantId: string;
+  tenantName?: string;
+  conversationsCount?: number;
+  connectedAt?: string;
+  disconnectedAt?: string;
   createdAt: string;
-  updatedAt: string;
-  lastConnectedAt?: string;
+  updatedAt?: string;
 }
 
 export interface CreateWhatsappInstanceData {
