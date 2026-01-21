@@ -549,4 +549,490 @@ router.put('/tickets/:id/priority', authenticate, requireSuperAdmin, async (req:
   }
 });
 
+// ============================================================================
+// GET /api/support/slas - List SLAs
+// ============================================================================
+router.get('/slas', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const slas = await prisma.sLA.findMany({
+      orderBy: { priority: 'asc' },
+      include: {
+        _count: {
+          select: { tickets: true },
+        },
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: slas.map(s => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        firstResponseMinutes: s.firstResponseMinutes,
+        resolutionMinutes: s.resolutionMinutes,
+        priority: s.priority,
+        isDefault: s.isDefault,
+        isActive: s.isActive,
+        ticketsCount: s._count.tickets,
+        createdAt: s.createdAt.toISOString(),
+        updatedAt: s.updatedAt.toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error('List SLAs error:', error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Erro interno do servidor',
+      },
+    });
+  }
+});
+
+// ============================================================================
+// POST /api/support/slas - Create SLA
+// ============================================================================
+router.post('/slas', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { name, description, firstResponseMinutes, resolutionMinutes, priority, isDefault } = req.body;
+
+    if (!name || !firstResponseMinutes || !resolutionMinutes || !priority) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Nome, tempo de primeira resposta, tempo de resolução e prioridade são obrigatórios',
+        },
+      });
+    }
+
+    // If this is default, unset other defaults for same priority
+    if (isDefault) {
+      await prisma.sLA.updateMany({
+        where: { priority, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+
+    const sla = await prisma.sLA.create({
+      data: {
+        id: uuidv4(),
+        name,
+        description: description || null,
+        firstResponseMinutes,
+        resolutionMinutes,
+        priority,
+        isDefault: isDefault || false,
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: sla,
+    });
+  } catch (error) {
+    console.error('Create SLA error:', error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Erro interno do servidor',
+      },
+    });
+  }
+});
+
+// ============================================================================
+// PUT /api/support/slas/:id - Update SLA
+// ============================================================================
+router.put('/slas/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, description, firstResponseMinutes, resolutionMinutes, priority, isDefault, isActive } = req.body;
+
+    const sla = await prisma.sLA.findUnique({
+      where: { id },
+    });
+
+    if (!sla) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'SLA_NOT_FOUND',
+          message: 'SLA não encontrado',
+        },
+      });
+    }
+
+    // If setting as default, unset other defaults for same priority
+    if (isDefault && !sla.isDefault) {
+      const targetPriority = priority || sla.priority;
+      await prisma.sLA.updateMany({
+        where: { priority: targetPriority, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+
+    const updatedSla = await prisma.sLA.update({
+      where: { id },
+      data: {
+        name: name ?? sla.name,
+        description: description ?? sla.description,
+        firstResponseMinutes: firstResponseMinutes ?? sla.firstResponseMinutes,
+        resolutionMinutes: resolutionMinutes ?? sla.resolutionMinutes,
+        priority: priority ?? sla.priority,
+        isDefault: isDefault ?? sla.isDefault,
+        isActive: isActive ?? sla.isActive,
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: updatedSla,
+    });
+  } catch (error) {
+    console.error('Update SLA error:', error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Erro interno do servidor',
+      },
+    });
+  }
+});
+
+// ============================================================================
+// DELETE /api/support/slas/:id - Delete SLA
+// ============================================================================
+router.delete('/slas/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const sla = await prisma.sLA.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: { tickets: true },
+        },
+      },
+    });
+
+    if (!sla) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'SLA_NOT_FOUND',
+          message: 'SLA não encontrado',
+        },
+      });
+    }
+
+    if (sla._count.tickets > 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'SLA_IN_USE',
+          message: 'Este SLA está sendo usado por tickets e não pode ser removido',
+        },
+      });
+    }
+
+    await prisma.sLA.delete({
+      where: { id },
+    });
+
+    return res.json({
+      success: true,
+      data: { message: 'SLA removido com sucesso' },
+    });
+  } catch (error) {
+    console.error('Delete SLA error:', error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Erro interno do servidor',
+      },
+    });
+  }
+});
+
+// ============================================================================
+// GET /api/support/stats - Get support statistics
+// ============================================================================
+router.get('/stats', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { period = '30d' } = req.query;
+
+    // Calculate date range
+    const now = new Date();
+    let startDate: Date;
+    switch (period) {
+      case '7d':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case '30d':
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+      case '90d':
+        startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+        break;
+      default:
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    }
+
+    // Get ticket counts by status
+    const ticketsByStatus = await prisma.ticket.groupBy({
+      by: ['status'],
+      _count: { id: true },
+      where: {
+        createdAt: { gte: startDate },
+      },
+    });
+
+    // Get ticket counts by priority
+    const ticketsByPriority = await prisma.ticket.groupBy({
+      by: ['priority'],
+      _count: { id: true },
+      where: {
+        createdAt: { gte: startDate },
+      },
+    });
+
+    // Get total tickets
+    const totalTickets = await prisma.ticket.count({
+      where: {
+        createdAt: { gte: startDate },
+      },
+    });
+
+    // Get resolved tickets
+    const resolvedTickets = await prisma.ticket.count({
+      where: {
+        createdAt: { gte: startDate },
+        status: { in: ['resolved', 'closed'] },
+      },
+    });
+
+    // Get open tickets
+    const openTickets = await prisma.ticket.count({
+      where: {
+        status: { in: ['open', 'in_progress', 'waiting_customer', 'waiting_internal'] },
+      },
+    });
+
+    // Calculate average resolution time (for resolved tickets)
+    const resolvedTicketsWithTime = await prisma.ticket.findMany({
+      where: {
+        createdAt: { gte: startDate },
+        resolvedAt: { not: null },
+      },
+      select: {
+        createdAt: true,
+        resolvedAt: true,
+      },
+    });
+
+    let avgResolutionMinutes = 0;
+    if (resolvedTicketsWithTime.length > 0) {
+      const totalMinutes = resolvedTicketsWithTime.reduce((sum, t) => {
+        const diff = t.resolvedAt!.getTime() - t.createdAt.getTime();
+        return sum + diff / (1000 * 60);
+      }, 0);
+      avgResolutionMinutes = Math.round(totalMinutes / resolvedTicketsWithTime.length);
+    }
+
+    // Get tickets by category
+    const ticketsByCategory = await prisma.ticket.groupBy({
+      by: ['category'],
+      _count: { id: true },
+      where: {
+        createdAt: { gte: startDate },
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        period,
+        summary: {
+          totalTickets,
+          openTickets,
+          resolvedTickets,
+          resolutionRate: totalTickets > 0 ? Math.round((resolvedTickets / totalTickets) * 100) : 0,
+          avgResolutionMinutes,
+        },
+        byStatus: ticketsByStatus.map(s => ({
+          status: s.status,
+          count: s._count.id,
+        })),
+        byPriority: ticketsByPriority.map(p => ({
+          priority: p.priority,
+          count: p._count.id,
+        })),
+        byCategory: ticketsByCategory.map(c => ({
+          category: c.category || 'general',
+          count: c._count.id,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error('Get support stats error:', error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Erro interno do servidor',
+      },
+    });
+  }
+});
+
+// ============================================================================
+// POST /api/support/tickets/:id/reopen - Reopen ticket
+// ============================================================================
+router.post('/tickets/:id/reopen', authenticate, requirePermission('support:manage'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const user = req.user!;
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id },
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'TICKET_NOT_FOUND',
+          message: 'Ticket não encontrado',
+        },
+      });
+    }
+
+    // Check access
+    if (user.role !== 'superadmin' && ticket.tenantId !== user.tenantId) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          code: 'FORBIDDEN',
+          message: 'Você não tem acesso a este ticket',
+        },
+      });
+    }
+
+    if (ticket.status !== 'closed' && ticket.status !== 'resolved') {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_STATUS',
+          message: 'Apenas tickets fechados ou resolvidos podem ser reabertos',
+        },
+      });
+    }
+
+    const updatedTicket = await prisma.ticket.update({
+      where: { id },
+      data: {
+        status: 'open',
+        resolvedAt: null,
+        updatedAt: new Date(),
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        id: updatedTicket.id,
+        status: updatedTicket.status,
+      },
+    });
+  } catch (error) {
+    console.error('Reopen ticket error:', error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Erro interno do servidor',
+      },
+    });
+  }
+});
+
+// ============================================================================
+// PUT /api/support/tickets/:id/status - Update ticket status
+// ============================================================================
+router.put('/tickets/:id/status', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const validStatuses = ['open', 'in_progress', 'waiting_customer', 'waiting_internal', 'resolved', 'closed'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Status inválido',
+        },
+      });
+    }
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id },
+    });
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'TICKET_NOT_FOUND',
+          message: 'Ticket não encontrado',
+        },
+      });
+    }
+
+    const updateData: any = {
+      status,
+      updatedAt: new Date(),
+    };
+
+    // Set resolvedAt if status is resolved or closed
+    if ((status === 'resolved' || status === 'closed') && !ticket.resolvedAt) {
+      updateData.resolvedAt = new Date();
+    }
+
+    // Clear resolvedAt if reopening
+    if (status === 'open' || status === 'in_progress') {
+      updateData.resolvedAt = null;
+    }
+
+    const updatedTicket = await prisma.ticket.update({
+      where: { id },
+      data: updateData,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        id: updatedTicket.id,
+        status: updatedTicket.status,
+        resolvedAt: updatedTicket.resolvedAt?.toISOString() || null,
+      },
+    });
+  } catch (error) {
+    console.error('Update ticket status error:', error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Erro interno do servidor',
+      },
+    });
+  }
+});
+
 export default router;
