@@ -52,7 +52,7 @@ export function useUsers(filters: UserFilters = {}) {
   const { search, role, tenantId, isActive, page = 1, limit = 10 } = filters;
 
   const query = usePaginatedQuery<UsersListResponse>(
-    '/api/users',
+    '/users',
     { page, limit, search, role, tenantId, isActive },
     { immediate: true }
   );
@@ -98,7 +98,7 @@ export function useUser(userId: string | undefined) {
  */
 export function useCurrentUser() {
   const query = useQuery<{ user: User }>(
-    '/api/auth/me',
+    '/auth/me',
     undefined,
     { immediate: true }
   );
@@ -123,7 +123,7 @@ export function useCreateUser(options?: {
   onError?: (error: Error) => void;
 }) {
   const mutation = useMutation<{ user: User }, CreateUserData>(
-    (data) => api.post('/api/users', data),
+    (data) => api.post('/users', data),
     {
       onSuccess: (data) => {
         if (data?.user) {

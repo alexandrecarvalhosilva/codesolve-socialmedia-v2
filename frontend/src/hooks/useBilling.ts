@@ -168,7 +168,7 @@ interface UseSubscriptionReturn {
   refetch: () => void;
 }
 
-export function useSubscription(id: string | undefined): UseSubscriptionReturn {
+export function useSubscriptionById(id: string | undefined): UseSubscriptionReturn {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -198,7 +198,64 @@ export function useSubscription(id: string | undefined): UseSubscriptionReturn {
     fetchSubscription();
   }, [fetchSubscription]);
 
-  return { subscription, isLoading, error, refetch: fetchSubscription };
+  return { subscription, isLoading, error, refetch: fetchSubscription, fetchSubscription };
+}
+
+// ============================================================================
+// CURRENT TENANT SUBSCRIPTION HOOK (for BillingSummaryCard)
+// ============================================================================
+
+interface CurrentSubscription {
+  planName: string;
+  amount: number;
+  nextBillingDate?: string;
+  usage?: {
+    messages: number;
+    messagesLimit: number;
+    instances: number;
+    instancesLimit: number;
+  };
+}
+
+interface UseCurrentSubscriptionReturn {
+  subscription: CurrentSubscription | null;
+  isLoading: boolean;
+  error: Error | null;
+  fetchSubscription: () => void;
+}
+
+export function useSubscription(): UseCurrentSubscriptionReturn {
+  const [subscription, setSubscription] = useState<CurrentSubscription | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchSubscription = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const response = await api.get('/billing/my-subscription');
+      if (response.success && response.data) {
+        const data = response.data as any;
+        setSubscription({
+          planName: data.plan?.name || 'N/A',
+          amount: data.plan?.priceMonthly || 0,
+          nextBillingDate: data.currentPeriodEnd,
+          usage: data.usage,
+        });
+      }
+    } catch (err) {
+      // Fallback - no subscription
+      setSubscription(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSubscription();
+  }, [fetchSubscription]);
+
+  return { subscription, isLoading, error, fetchSubscription };
 }
 
 // ============================================================================
@@ -803,9 +860,17 @@ export function useFinancialKPIs(): UseFinancialKPIsReturn {
   const fetchKPIs = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await api.get('/billing/kpis');
-      if (response.data.success) {
-        setKpis(response.data.data);
+      const response = await api.get('/reports/financial');
+      if (response.success && response.data) {
+        const data = response.data as any;
+        setKpis({
+          mrr: data.kpis?.mrr || 0,
+          mrrGrowth: data.kpis?.mrrGrowth || 0,
+          activeSubscriptions: data.kpis?.activeSubscriptions || 0,
+          trialSubscriptions: data.kpis?.trialSubscriptions || 0,
+          churnRate: data.kpis?.churnRate || 0,
+          pendingRevenue: data.kpis?.pendingRevenue || 0,
+        });
       }
     } catch (error) {
       // Fallback data
@@ -847,9 +912,13 @@ export function useMrrData(): UseMrrDataReturn {
   const fetchMrrData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await api.get('/billing/mrr-history');
-      if (response.data.success) {
-        setData(response.data.data || []);
+      const response = await api.get('/reports/mrr');
+      if (response.success && response.data) {
+        const mrrData = (response.data as any).mrrByMonth || [];
+        setData(mrrData.map((item: any) => ({
+          month: item.month,
+          revenue: item.mrr || 0,
+        })));
       }
     } catch (error) {
       setData([]);
@@ -906,4 +975,326 @@ export function useValidateCoupon(): UseValidateCouponReturn {
   }, []);
 
   return { validateCoupon, isValidating };
+}
+
+// ============================================================================
+// PAY INVOICE HOOK
+// ============================================================================
+
+interface UsePayInvoiceOptions {
+  onSuccess?: () => void;
+  onError?: (error: Error) => void;
+}
+
+interface UsePayInvoiceReturn {
+  payInvoice: (invoiceId: string, paymentMethodId?: string) => Promise<void>;
+  isPaying: boolean;
+}
+
+export function usePayInvoice(options: UsePayInvoiceOptions = {}): UsePayInvoiceReturn {
+  const [isPaying, setIsPaying] = useState(false);
+
+  const payInvoice = useCallback(async (invoiceId: string, paymentMethodId?: string) => {
+    try {
+      setIsPaying(true);
+      const response = await api.post(`/billing/invoices/${invoiceId}/pay`, { paymentMethodId });
+      if (response.data.success) {
+        options.onSuccess?.();
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Erro ao pagar fatura');
+      options.onError?.(error);
+      throw error;
+    } finally {
+      setIsPaying(false);
+    }
+  }, [options]);
+
+  return { payInvoice, isPaying };
+}
+
+// ============================================================================
+// CREATE/UPDATE/DELETE COUPON HOOKS
+// ============================================================================
+
+interface UseCreateCouponOptions {
+  onSuccess?: (coupon: any) => void;
+  onError?: (error: Error) => void;
+}
+
+export function useCreateCoupon(options: UseCreateCouponOptions = {}) {
+  const [isCreating, setIsCreating] = useState(false);
+
+  const createCoupon = useCallback(async (data: any) => {
+    try {
+      setIsCreating(true);
+      const response = await api.post('/billing/coupons', data);
+      if (response.data.success) {
+        options.onSuccess?.(response.data.data);
+        return response.data.data;
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Erro ao criar cupom');
+      options.onError?.(error);
+      throw error;
+    } finally {
+      setIsCreating(false);
+    }
+  }, [options]);
+
+  return { createCoupon, isCreating };
+}
+
+interface UseUpdateCouponOptions {
+  onSuccess?: (coupon: any) => void;
+  onError?: (error: Error) => void;
+}
+
+export function useUpdateCoupon(options: UseUpdateCouponOptions = {}) {
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const updateCoupon = useCallback(async (id: string, data: any) => {
+    try {
+      setIsUpdating(true);
+      const response = await api.put(`/billing/coupons/${id}`, data);
+      if (response.data.success) {
+        options.onSuccess?.(response.data.data);
+        return response.data.data;
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Erro ao atualizar cupom');
+      options.onError?.(error);
+      throw error;
+    } finally {
+      setIsUpdating(false);
+    }
+  }, [options]);
+
+  return { updateCoupon, isUpdating };
+}
+
+interface UseDeleteCouponOptions {
+  onSuccess?: () => void;
+  onError?: (error: Error) => void;
+}
+
+export function useDeleteCoupon(options: UseDeleteCouponOptions = {}) {
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const deleteCoupon = useCallback(async (id: string) => {
+    try {
+      setIsDeleting(true);
+      const response = await api.delete(`/billing/coupons/${id}`);
+      if (response.data.success) {
+        options.onSuccess?.();
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Erro ao deletar cupom');
+      options.onError?.(error);
+      throw error;
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [options]);
+
+  return { deleteCoupon, isDeleting };
+}
+
+// ============================================================================
+// CREATE/UPDATE/DELETE PLAN HOOKS
+// ============================================================================
+
+interface UseCreatePlanOptions {
+  onSuccess?: (plan: BillingPlan) => void;
+  onError?: (error: Error) => void;
+}
+
+export function useCreatePlan(options: UseCreatePlanOptions = {}) {
+  const [isCreating, setIsCreating] = useState(false);
+
+  const createPlan = useCallback(async (data: Partial<BillingPlan>) => {
+    try {
+      setIsCreating(true);
+      const response = await api.post('/billing/plans', data);
+      if (response.data.success) {
+        options.onSuccess?.(response.data.data);
+        return response.data.data;
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Erro ao criar plano');
+      options.onError?.(error);
+      throw error;
+    } finally {
+      setIsCreating(false);
+    }
+  }, [options]);
+
+  return { createPlan, isCreating };
+}
+
+interface UseUpdatePlanOptions {
+  onSuccess?: (plan: BillingPlan) => void;
+  onError?: (error: Error) => void;
+}
+
+export function useUpdatePlan(options: UseUpdatePlanOptions = {}) {
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const updatePlan = useCallback(async (id: string, data: Partial<BillingPlan>) => {
+    try {
+      setIsUpdating(true);
+      const response = await api.put(`/billing/plans/${id}`, data);
+      if (response.data.success) {
+        options.onSuccess?.(response.data.data);
+        return response.data.data;
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Erro ao atualizar plano');
+      options.onError?.(error);
+      throw error;
+    } finally {
+      setIsUpdating(false);
+    }
+  }, [options]);
+
+  return { updatePlan, isUpdating };
+}
+
+interface UseDeletePlanOptions {
+  onSuccess?: () => void;
+  onError?: (error: Error) => void;
+}
+
+export function useDeletePlan(options: UseDeletePlanOptions = {}) {
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const deletePlan = useCallback(async (id: string) => {
+    try {
+      setIsDeleting(true);
+      const response = await api.delete(`/billing/plans/${id}`);
+      if (response.data.success) {
+        options.onSuccess?.();
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Erro ao deletar plano');
+      options.onError?.(error);
+      throw error;
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [options]);
+
+  return { deletePlan, isDeleting };
+}
+
+// ============================================================================
+// BILLING HISTORY HOOK
+// ============================================================================
+
+interface BillingHistoryItem {
+  id: string;
+  type: 'invoice' | 'payment' | 'credit' | 'refund';
+  description: string;
+  amount: number;
+  status: string;
+  createdAt: string;
+}
+
+interface UseBillingHistoryOptions {
+  page?: number;
+  limit?: number;
+}
+
+interface UseBillingHistoryReturn {
+  history: BillingHistoryItem[];
+  isLoading: boolean;
+  error: Error | null;
+  meta: PaginationMeta | null;
+  refetch: () => void;
+}
+
+export function useBillingHistory(options: UseBillingHistoryOptions = {}): UseBillingHistoryReturn {
+  const [history, setHistory] = useState<BillingHistoryItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [meta, setMeta] = useState<PaginationMeta | null>(null);
+
+  const fetchHistory = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const response = await api.get('/billing/history', {
+        params: {
+          page: options.page || 1,
+          limit: options.limit || 20,
+        },
+      });
+      if (response.data.success) {
+        setHistory(response.data.data || []);
+        setMeta(response.data.meta || null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Erro ao carregar histórico'));
+      setHistory([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [options.page, options.limit]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
+  return { history, isLoading, error, meta, refetch: fetchHistory };
+}
+
+// ============================================================================
+// CREDITS HOOK
+// ============================================================================
+
+interface Credits {
+  balance: number;
+  currency: string;
+  history: Array<{
+    id: string;
+    amount: number;
+    type: 'add' | 'use';
+    description: string;
+    createdAt: string;
+  }>;
+}
+
+interface UseCreditsReturn {
+  credits: Credits | null;
+  isLoading: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
+
+export function useCredits(): UseCreditsReturn {
+  const [credits, setCredits] = useState<Credits | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchCredits = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const response = await api.get('/billing/credits');
+      if (response.data.success) {
+        setCredits(response.data.data);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('Erro ao carregar créditos'));
+      setCredits({ balance: 0, currency: 'BRL', history: [] });
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCredits();
+  }, [fetchCredits]);
+
+  return { credits, isLoading, error, refetch: fetchCredits };
 }

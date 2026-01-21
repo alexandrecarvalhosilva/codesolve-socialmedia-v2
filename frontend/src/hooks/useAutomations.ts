@@ -41,9 +41,9 @@ export function useAutomations(options: UseAutomationsOptions = {}): UseAutomati
           limit: options.limit || 20,
         },
       });
-      if (response.data.success) {
-        setAutomations(response.data.data || []);
-        setMeta(response.data.meta || null);
+      if (response.success) {
+        setAutomations(response.data || []);
+        setMeta(response.meta || null);
       }
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Erro ao carregar automações'));
@@ -82,8 +82,8 @@ export function useAutomation(automationId: string | undefined): UseAutomationRe
       setIsLoading(true);
       setError(null);
       const response = await api.get(`/automations/${automationId}`);
-      if (response.data.success) {
-        setAutomation(response.data.data);
+      if (response.success) {
+        setAutomation(response.data);
       }
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Erro ao carregar automação'));
@@ -129,9 +129,9 @@ export function useCreateAutomation(options: UseCreateAutomationOptions = {}): U
     try {
       setIsCreating(true);
       const response = await api.post('/automations', data);
-      if (response.data.success) {
-        options.onSuccess?.(response.data.data);
-        return response.data.data;
+      if (response.success) {
+        options.onSuccess?.(response.data);
+        return response.data;
       }
       return null;
     } catch (err) {
@@ -176,9 +176,9 @@ export function useUpdateAutomation(options: UseUpdateAutomationOptions = {}): U
     try {
       setIsUpdating(true);
       const response = await api.patch(`/automations/${id}`, data);
-      if (response.data.success) {
-        options.onSuccess?.(response.data.data);
-        return response.data.data;
+      if (response.success) {
+        options.onSuccess?.(response.data);
+        return response.data;
       }
       return null;
     } catch (err) {
@@ -214,7 +214,7 @@ export function useDeleteAutomation(options: UseDeleteAutomationOptions = {}): U
     try {
       setIsDeleting(true);
       const response = await api.delete(`/automations/${id}`);
-      if (response.data.success) {
+      if (response.success) {
         options.onSuccess?.();
         return true;
       }
@@ -252,9 +252,9 @@ export function useToggleAutomation(options: UseToggleAutomationOptions = {}): U
     try {
       setIsToggling(true);
       const response = await api.post(`/automations/${id}/toggle`);
-      if (response.data.success) {
-        options.onSuccess?.(response.data.data);
-        return response.data.data;
+      if (response.success) {
+        options.onSuccess?.(response.data);
+        return response.data;
       }
       return null;
     } catch (err) {
@@ -301,8 +301,8 @@ export function useAutomationStats(tenantId?: string): UseAutomationStatsReturn 
       const response = await api.get('/automations/stats', {
         params: { tenantId },
       });
-      if (response.data.success) {
-        setStats(response.data.data);
+      if (response.success) {
+        setStats(response.data);
       }
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Erro ao carregar estatísticas'));

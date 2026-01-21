@@ -10,7 +10,7 @@
  */
 
 // URL base da API
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3001') + '/api';
 
 // Chaves de storage
 const AUTH_TOKEN_KEY = 'codesolve_auth_token';

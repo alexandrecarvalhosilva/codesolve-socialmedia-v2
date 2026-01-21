@@ -56,7 +56,7 @@ export function useModuleCatalog() {
     setError(null);
     
     try {
-      const response = await api.get<CatalogResponse>('/api/modules/catalog');
+      const response = await api.get<CatalogResponse>('/modules/catalog');
       
       if (response.success && response.data) {
         setModules(response.data.modules);
@@ -94,7 +94,7 @@ export function useTenantModules() {
     setError(null);
     
     try {
-      const response = await api.get<TenantModulesResponse>('/api/modules/tenant');
+      const response = await api.get<TenantModulesResponse>('/modules/tenant');
       
       if (response.success && response.data) {
         setModules(response.data.modules);
@@ -132,7 +132,7 @@ export function useTenantModules() {
 
   const updateModulesBulk = useCallback(async (moduleIds: string[], tenantId?: string): Promise<boolean> => {
     try {
-      const response = await api.put<{ enabledModules: string[] }>('/api/modules/tenant/bulk', {
+      const response = await api.put<{ enabledModules: string[] }>('/modules/tenant/bulk', {
         modules: moduleIds,
         tenantId,
       });
@@ -170,6 +170,22 @@ export function useTenantModules() {
     updateModulesBulk,
     isModuleEnabled,
     getModulesByCategory,
+  };
+}
+
+// ============================================================================
+// HOOK: useModules (alias para compatibilidade)
+// ============================================================================
+
+export function useModules() {
+  const { modules, isLoading, error, fetchCatalog } = useModuleCatalog();
+
+  return {
+    modules,
+    isLoading,
+    error,
+    fetchModules: fetchCatalog,
+    refetch: fetchCatalog,
   };
 }
 

@@ -25,7 +25,7 @@ services:
     network_mode: host
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:9ee5b061c99d1c2d8127e96bb5ea8da2@72.60.3.251:5432/codesolve-socialmedia}
-    command: sh -c "npx prisma db push --accept-data-loss && npx prisma db seed"
+    command: sh -c "npx prisma db push --accept-data-loss && npx prisma db seed || true"
     restart: "no"
 
   # ===========================================================================

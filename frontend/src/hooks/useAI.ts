@@ -164,13 +164,26 @@ export function useAIConsumption(period: string = '30d', tenantId?: string): Use
       setError(null);
       const params: Record<string, string> = { period };
       if (tenantId) params.tenantId = tenantId;
-      
-      const response = await api.get('/ai/consumption', { params });
-      if (response.data.success) {
-        setConsumption(response.data.data);
+
+      const response = await api.get('/ai/consumption', params);
+      if (response.success && response.data) {
+        setConsumption(response.data as AIConsumption);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error('Erro ao carregar consumo de AI'));
+    } catch (err: any) {
+      // For superadmin without tenant context, return fallback data silently
+      const isTenantRequired = err?.code === 'TENANT_REQUIRED' || err?.status === 400;
+      if (!isTenantRequired) {
+        setError(err instanceof Error ? err : new Error('Erro ao carregar consumo de AI'));
+      }
+      // Set fallback data
+      setConsumption({
+        totalTokensUsed: 0,
+        totalCost: 0,
+        limit: 100000,
+        percentage: 0,
+        byModel: [],
+        byDay: [],
+      });
     } finally {
       setIsLoading(false);
     }

@@ -53,7 +53,7 @@ export function useRoles() {
     setError(null);
     
     try {
-      const response = await api.get<RolesResponse>('/api/roles');
+      const response = await api.get<RolesResponse>('/roles');
       
       if (response.success && response.data) {
         setRoles(response.data.items);
@@ -68,7 +68,7 @@ export function useRoles() {
 
   const createRole = useCallback(async (data: CreateRoleData): Promise<Role | null> => {
     try {
-      const response = await api.post<Role>('/api/roles', data);
+      const response = await api.post<Role>('/roles', data);
       
       if (response.success && response.data) {
         setRoles(prev => [...prev, response.data!]);
@@ -132,7 +132,7 @@ export function usePermissions() {
     setError(null);
     
     try {
-      const response = await api.get<PermissionsData>('/api/roles/meta/permissions');
+      const response = await api.get<PermissionsData>('/roles/meta/permissions');
       
       if (response.success && response.data) {
         setPermissions(response.data);

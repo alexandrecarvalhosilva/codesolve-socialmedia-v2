@@ -68,7 +68,7 @@ export function useWhatsappInstances(filters: InstanceFilters = {}) {
   const { tenantId, status, search, page = 1, limit = 10 } = filters;
 
   const query = usePaginatedQuery<InstancesListResponse>(
-    '/api/whatsapp/instances',
+    '/whatsapp/instances',
     { page, limit, tenantId, status, search },
     { immediate: true }
   );
@@ -140,7 +140,7 @@ export function useCreateWhatsappInstance(options?: {
   onError?: (error: Error) => void;
 }) {
   const mutation = useMutation<InstanceResponse, CreateInstanceData>(
-    (data) => api.post('/api/whatsapp/instances', data),
+    (data) => api.post('/whatsapp/instances', data),
     {
       onSuccess: (data) => {
         if (data?.instance) {
@@ -310,6 +310,47 @@ export function useCheckWhatsAppStatus(options?: {
     isChecking: mutation.isLoading,
     error: mutation.error,
     reset: mutation.reset,
+  };
+}
+
+// ============================================================================
+// HOOK COMBINADO (usado pelo Onboarding)
+// ============================================================================
+
+/**
+ * Hook combinado para gerenciamento de WhatsApp
+ * Usado principalmente na página de Onboarding
+ */
+export function useWhatsApp() {
+  const { instances, isLoading, refetch } = useWhatsappInstances();
+  const { createInstance: doCreate, isCreating } = useCreateWhatsappInstance({
+    onSuccess: () => refetch(),
+  });
+  const { connectInstance, qrCode, isConnecting } = useConnectWhatsappInstance();
+  const { disconnectInstance: doDisconnect, isDisconnecting } = useDisconnectWhatsappInstance({
+    onSuccess: () => refetch(),
+  });
+
+  const createInstance = useCallback(async (data: CreateInstanceData) => {
+    return doCreate(data);
+  }, [doCreate]);
+
+  const getQrCode = useCallback(async (instanceId: string) => {
+    connectInstance(instanceId);
+    return qrCode;
+  }, [connectInstance, qrCode]);
+
+  const disconnectInstance = useCallback(async (instanceId: string) => {
+    doDisconnect(instanceId);
+  }, [doDisconnect]);
+
+  return {
+    instances,
+    isLoading: isLoading || isCreating || isConnecting || isDisconnecting,
+    createInstance,
+    getQrCode,
+    disconnectInstance,
+    refetch,
   };
 }
 

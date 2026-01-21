@@ -87,7 +87,7 @@ export function useConversations(filters: ConversationFilters = {}) {
   } = filters;
 
   const query = usePaginatedQuery<ConversationsListResponse>(
-    '/api/chat/conversations',
+    '/chat/conversations',
     { page, limit, tenantId, status, channel, assignedUserId, whatsappInstanceId, search },
     { immediate: true }
   );

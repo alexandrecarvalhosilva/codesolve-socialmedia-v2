@@ -51,7 +51,7 @@ export function useTenants(filters: TenantFilters = {}) {
   const { search, status, planId, page = 1, limit = 10 } = filters;
 
   const query = usePaginatedQuery<TenantsListResponse>(
-    '/api/tenants',
+    '/tenants',
     { page, limit, search, status, planId },
     { immediate: true }
   );
@@ -104,7 +104,7 @@ export function useCreateTenant(options?: {
   onError?: (error: Error) => void;
 }) {
   const mutation = useMutation<{ tenant: Tenant }, CreateTenantData>(
-    (data) => api.post('/api/tenants', data),
+    (data) => api.post('/tenants', data),
     {
       onSuccess: (data) => {
         if (data?.tenant) {
