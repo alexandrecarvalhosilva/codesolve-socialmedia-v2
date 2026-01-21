@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../config/database.js';
 import { authenticate, requireSuperAdmin, requireTenantAccess } from '../middleware/auth.js';
 import { hashPassword, getUserPermissions } from '../utils/auth.js';
+import { getClientIp } from '../utils/request.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -248,7 +249,7 @@ router.post('/', authenticate, requireSuperAdmin, async (req: Request, res: Resp
         entity: 'tenant',
         entityId: tenant.id,
         newValue: { name, slug: tenantSlug, adminEmail },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
@@ -341,7 +342,7 @@ router.put('/:id', authenticate, requireTenantAccess('id'), async (req: Request,
         entityId: id,
         oldValue,
         newValue: { name, domain, logo },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
@@ -410,7 +411,7 @@ router.post('/:id/suspend', authenticate, requireSuperAdmin, async (req: Request
         entityId: id,
         oldValue: { status: tenant.status },
         newValue: { status: 'suspended', reason },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
@@ -472,7 +473,7 @@ router.post('/:id/activate', authenticate, requireSuperAdmin, async (req: Reques
         entityId: id,
         oldValue: { status: tenant.status },
         newValue: { status: 'active' },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
@@ -537,7 +538,7 @@ router.delete('/:id', authenticate, requireSuperAdmin, async (req: Request, res:
         entity: 'tenant',
         entityId: id,
         oldValue: { name: tenant.name, status: tenant.status },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });

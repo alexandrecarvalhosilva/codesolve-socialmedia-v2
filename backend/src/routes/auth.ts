@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../config/database.js';
 import { hashPassword, verifyPassword, generateToken, getTokenExpiration, getUserPermissions } from '../utils/auth.js';
+import { getClientIp } from '../utils/request.js';
 import { authenticate } from '../middleware/auth.js';
 import { authRateLimit } from '../middleware/rateLimit.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -92,7 +93,7 @@ router.post('/login', authRateLimit, async (req: Request, res: Response) => {
         userId: user.id,
         token,
         userAgent: req.headers['user-agent'] || null,
-        ipAddress: req.ip || null,
+        ipAddress: getClientIp(req),
         expiresAt,
       },
     });
@@ -220,7 +221,7 @@ router.post('/register', authRateLimit, async (req: Request, res: Response) => {
         userId: user.id,
         token,
         userAgent: req.headers['user-agent'] || null,
-        ipAddress: req.ip || null,
+        ipAddress: getClientIp(req),
         expiresAt,
       },
     });

@@ -434,6 +434,135 @@ router.get('/ai-consumption', authenticate, requirePermission('reports:view'), a
 });
 
 // ============================================================================
+// GET /api/reports/ai-consumption/global - Get global AI consumption data (SuperAdmin)
+// ============================================================================
+router.get('/ai-consumption/global', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { period = '30d' } = req.query;
+
+    // Calculate date range
+    let days = 30;
+    switch (period) {
+      case '7d': days = 7; break;
+      case '30d': days = 30; break;
+      case '90d': days = 90; break;
+    }
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    // Total AI messages across all tenants
+    const aiMessages = await prisma.message.count({
+      where: {
+        isFromAi: true,
+        createdAt: { gte: startDate },
+      },
+    });
+
+    // Total tokens across all tenants
+    const totalTokensResult = await prisma.usageRecord.aggregate({
+      _sum: { usageCount: true },
+      where: {
+        resourceType: 'ai_tokens',
+        createdAt: { gte: startDate },
+      },
+    });
+    const totalTokens = Number(totalTokensResult._sum.usageCount || 0);
+
+    // Active tenants in period (with AI usage)
+    const activeTenantIds = await prisma.usageRecord.findMany({
+      where: {
+        resourceType: 'ai_tokens',
+        createdAt: { gte: startDate },
+      },
+      distinct: ['tenantId'],
+      select: { tenantId: true },
+    });
+    const activeTenants = activeTenantIds.length;
+
+    // Group usage by day for chart
+    const usageByDay = await prisma.$queryRaw`
+      SELECT
+        DATE("createdAt") as date,
+        SUM("usageCount")::bigint as tokens
+      FROM usage_records
+      WHERE "resourceType" = 'ai_tokens'
+        AND "createdAt" >= ${startDate}
+      GROUP BY DATE("createdAt")
+      ORDER BY date ASC
+    `;
+
+    // Top tenants by token usage
+    const topTenants = await prisma.$queryRaw`
+      SELECT
+        t.id as "tenantId",
+        t.name as "tenantName",
+        SUM(u."usageCount")::bigint as tokens
+      FROM usage_records u
+      JOIN tenants t ON t.id = u."tenantId"
+      WHERE u."resourceType" = 'ai_tokens'
+        AND u."createdAt" >= ${startDate}
+      GROUP BY t.id, t.name
+      ORDER BY tokens DESC
+      LIMIT 10
+    `;
+
+    // AI messages by tenant (for mapping)
+    const messagesByTenant = await prisma.message.groupBy({
+      by: ['tenantId'],
+      _count: { id: true },
+      where: {
+        isFromAi: true,
+        createdAt: { gte: startDate },
+      },
+      orderBy: {
+        _count: { id: 'desc' },
+      },
+      take: 10,
+    });
+
+    const messageCountByTenantId = new Map<string, number>(
+      messagesByTenant.map((item) => [item.tenantId, item._count.id])
+    );
+
+    const tenantConsumption = (topTenants as Array<{ tenantId: string; tenantName: string; tokens: number }>).map(
+      (tenant) => ({
+        tenantId: tenant.tenantId,
+        tenantName: tenant.tenantName,
+        totalTokens: tenant.tokens,
+        totalMessages: messageCountByTenantId.get(tenant.tenantId) || 0,
+        estimatedCost: 0,
+        avgResponseTime: 0,
+      })
+    );
+
+    return res.json({
+      success: true,
+      data: {
+        period,
+        summary: {
+          totalTokens,
+          aiMessages,
+          activeTenants,
+          avgTokensPerMessage: aiMessages > 0 ? Math.round(totalTokens / aiMessages) : 0,
+        },
+        usageByDay,
+        tenantConsumption,
+      },
+    });
+  } catch (error) {
+    console.error('Global AI consumption error:', error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Erro interno do servidor',
+      },
+    });
+  }
+});
+
+// ============================================================================
 // GET /api/reports/mrr - Get MRR data (SuperAdmin only)
 // ============================================================================
 router.get('/mrr', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {

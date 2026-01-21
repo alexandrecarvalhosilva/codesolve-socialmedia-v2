@@ -77,16 +77,16 @@ export default function Logs() {
   const [isExporting, setIsExporting] = useState(false);
   
   // Filters
-  const [actionFilter, setActionFilter] = useState<string>('');
-  const [entityFilter, setEntityFilter] = useState<string>('');
-  const [dateFilter, setDateFilter] = useState<string>('');
+  const [actionFilter, setActionFilter] = useState<string>('all');
+  const [entityFilter, setEntityFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<string>('all');
 
   // Fetch logs on mount and when filters change
   useEffect(() => {
     const filters: Record<string, string | number> = { page, limit: 20 };
-    if (actionFilter) filters.action = actionFilter;
-    if (entityFilter) filters.entity = entityFilter;
-    if (dateFilter) {
+    if (actionFilter !== 'all') filters.action = actionFilter;
+    if (entityFilter !== 'all') filters.entity = entityFilter;
+    if (dateFilter !== 'all') {
       const now = new Date();
       let startDate: Date;
       switch (dateFilter) {
@@ -280,7 +280,7 @@ export default function Logs() {
               <SelectValue placeholder="Ação" />
             </SelectTrigger>
             <SelectContent className="bg-cs-bg-card border-border">
-              <SelectItem value="" className="text-cs-text-primary">Todas as ações</SelectItem>
+              <SelectItem value="all" className="text-cs-text-primary">Todas as ações</SelectItem>
               {uniqueActions.map(action => (
                 <SelectItem key={action} value={action} className="text-cs-text-primary">
                   {action}
@@ -294,7 +294,7 @@ export default function Logs() {
               <SelectValue placeholder="Entidade" />
             </SelectTrigger>
             <SelectContent className="bg-cs-bg-card border-border">
-              <SelectItem value="" className="text-cs-text-primary">Todas as entidades</SelectItem>
+              <SelectItem value="all" className="text-cs-text-primary">Todas as entidades</SelectItem>
               {uniqueEntities.map(entity => (
                 <SelectItem key={entity} value={entity} className="text-cs-text-primary">
                   {entity}
@@ -308,7 +308,7 @@ export default function Logs() {
               <SelectValue placeholder="Período" />
             </SelectTrigger>
             <SelectContent className="bg-cs-bg-card border-border">
-              <SelectItem value="" className="text-cs-text-primary">Todo período</SelectItem>
+              <SelectItem value="all" className="text-cs-text-primary">Todo período</SelectItem>
               <SelectItem value="today" className="text-cs-text-primary">Hoje</SelectItem>
               <SelectItem value="week" className="text-cs-text-primary">Última semana</SelectItem>
               <SelectItem value="month" className="text-cs-text-primary">Último mês</SelectItem>

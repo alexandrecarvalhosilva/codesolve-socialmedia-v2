@@ -49,19 +49,21 @@ import { toast } from 'sonner';
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
 const formatTokens = (tokens: number) => {
+  if (!Number.isFinite(tokens)) return '0';
   if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
   if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`;
   return tokens.toString();
 };
 
 const formatCurrency = (value: number) => {
+  if (!Number.isFinite(value)) return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(0);
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 };
 
 export default function AIOverview() {
   const [period, setPeriod] = useState('30');
   
-  const { consumption, isLoading: consumptionLoading, fetchConsumption } = useAIConsumption();
+  const { consumption, isLoading: consumptionLoading, error: consumptionError, fetchConsumption } = useAIConsumption();
   const { models, isLoading: modelsLoading, fetchModels } = useAIModels();
 
   const isLoading = consumptionLoading || modelsLoading;
@@ -130,6 +132,11 @@ export default function AIOverview() {
       <Header />
       
       <div className="p-8 space-y-6 animate-fade-in">
+        {consumptionError && (
+          <div className="border border-border bg-cs-bg-card rounded-lg p-4 text-sm text-cs-text-secondary">
+            Não foi possível carregar parte dos dados de consumo de IA. Os demais widgets continuam disponíveis.
+          </div>
+        )}
         {/* Page Header */}
         <div className="flex items-center justify-between">
           <div>

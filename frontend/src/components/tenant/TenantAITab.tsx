@@ -51,7 +51,7 @@ export function TenantAITab({ tenantId }: TenantAITabProps) {
   const { id } = useParams();
   const currentTenantId = tenantId || id || '1';
   
-  const { consumption, isLoading, fetchConsumption } = useAIConsumption(currentTenantId);
+  const { consumption, isLoading, error, fetchConsumption } = useAIConsumption(currentTenantId);
 
   useEffect(() => {
     fetchConsumption();
@@ -112,6 +112,11 @@ export function TenantAITab({ tenantId }: TenantAITabProps) {
 
   return (
     <div className="space-y-6">
+      {error && (
+        <div className="border border-border bg-cs-bg-card rounded-lg p-4 text-sm text-cs-text-secondary">
+          Não foi possível carregar parte dos dados de consumo de IA. Os demais widgets continuam disponíveis.
+        </div>
+      )}
       {/* Header with Actions */}
       <div className="flex items-center justify-between">
         <div>

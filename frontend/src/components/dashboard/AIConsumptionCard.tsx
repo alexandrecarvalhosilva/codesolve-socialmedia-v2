@@ -6,12 +6,16 @@ import { useAIConsumption } from '@/hooks/useAI';
 
 // Format helpers
 const formatTokens = (tokens: number): string => {
+  if (!Number.isFinite(tokens)) return '0';
   if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
   if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`;
   return tokens.toString();
 };
 
 const formatCurrency = (value: number): string => {
+  if (!Number.isFinite(value)) {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(0);
+  }
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL',
@@ -19,7 +23,7 @@ const formatCurrency = (value: number): string => {
 };
 
 export function AIConsumptionCard() {
-  const { consumption, isLoading, fetchConsumption } = useAIConsumption();
+  const { consumption, isLoading, error, fetchConsumption } = useAIConsumption();
 
   useEffect(() => {
     fetchConsumption();
@@ -41,15 +45,36 @@ export function AIConsumptionCard() {
     );
   }
 
-  const metrics = consumption || {
-    totalTokensToday: 0,
-    totalTokensMonth: 0,
-    estimatedCostToday: 0,
-    estimatedCostMonth: 0,
-    totalMessagesToday: 0,
-    activeTenantsToday: 0,
-    avgResponseTime: 0,
-    topModel: 'gpt-4',
+  if (error) {
+    return (
+      <div className="bg-cs-bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="p-2 rounded-lg bg-primary/10">
+              <Brain className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-cs-text-primary">Consumo OpenAI</h3>
+              <p className="text-xs text-cs-text-muted">Visão Global</p>
+            </div>
+          </div>
+        </div>
+        <div className="text-sm text-cs-text-secondary">
+          Não foi possível carregar os dados agora.
+        </div>
+      </div>
+    );
+  }
+
+  const metrics = {
+    totalTokensToday: consumption?.totalTokensToday ?? 0,
+    totalTokensMonth: consumption?.totalTokensMonth ?? 0,
+    estimatedCostToday: consumption?.estimatedCostToday ?? 0,
+    estimatedCostMonth: consumption?.estimatedCostMonth ?? 0,
+    totalMessagesToday: consumption?.totalMessagesToday ?? 0,
+    activeTenantsToday: consumption?.activeTenantsToday ?? 0,
+    avgResponseTime: Number(consumption?.avgResponseTime ?? 0),
+    topModel: consumption?.topModel ?? 'gpt-4',
   };
 
   return (

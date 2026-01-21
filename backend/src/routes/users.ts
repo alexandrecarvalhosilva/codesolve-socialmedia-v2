@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { prisma } from '../config/database.js';
 import { authenticate, requirePermission, requireTenantAccess } from '../middleware/auth.js';
 import { hashPassword, canManageRole, getUserPermissions } from '../utils/auth.js';
+import { getClientIp } from '../utils/request.js';
 import { invalidateUserPermissionsCache } from '../config/redis.js';
 import { v4 as uuidv4 } from 'uuid';
 import { UserRole } from '@prisma/client';
@@ -268,7 +269,7 @@ router.post('/', authenticate, requirePermission('users:create'), async (req: Re
         entity: 'user',
         entityId: newUser.id,
         newValue: { email, name, role: targetRole },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
@@ -385,7 +386,7 @@ router.put('/:id', authenticate, requirePermission('users:edit'), async (req: Re
         entityId: id,
         oldValue,
         newValue: { name, role, isActive },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
@@ -498,7 +499,7 @@ router.delete('/:id', authenticate, requirePermission('users:delete'), async (re
         entity: 'user',
         entityId: id,
         oldValue: { email: user.email, name: user.name, role: user.role },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });

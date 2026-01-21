@@ -31,10 +31,11 @@ export interface LogsFilters {
 }
 
 export interface LogsResponse {
-  logs: AuditLog[];
+  items: AuditLog[];
   total: number;
   page: number;
-  totalPages: number;
+  limit: number;
+  hasMore: boolean;
 }
 
 export function useLogs() {
@@ -60,14 +61,16 @@ export function useLogs() {
       if (filters.limit) params.append('limit', filters.limit.toString());
       if (user?.tenantId) params.append('tenantId', user.tenantId);
 
-      const response = await api.get(`/logs?${params.toString()}`);
+      const response = await api.get<LogsResponse>('/logs/audit', Object.fromEntries(params.entries()));
       
-      if (response.data.success) {
-        const data = response.data.data;
-        setLogs(data.logs || data);
-        setTotal(data.total || data.length || 0);
+      if (response.success && response.data) {
+        const data = response.data;
+        const items = data.items || [];
+        setLogs(items);
+        setTotal(data.total || 0);
         setPage(data.page || 1);
-        setTotalPages(data.totalPages || 1);
+        const limitValue = data.limit || filters.limit || 20;
+        setTotalPages(Math.max(1, Math.ceil((data.total || 0) / Number(limitValue))));
       }
     } catch (err) {
       setError('Erro ao carregar logs');
@@ -79,20 +82,13 @@ export function useLogs() {
 
   const exportLogs = useCallback(async (filters: LogsFilters = {}, format: 'csv' | 'json' = 'csv') => {
     try {
-      const params = new URLSearchParams();
-      if (filters.action) params.append('action', filters.action);
-      if (filters.entity) params.append('entity', filters.entity);
-      if (filters.startDate) params.append('startDate', filters.startDate);
-      if (filters.endDate) params.append('endDate', filters.endDate);
-      if (user?.tenantId) params.append('tenantId', user.tenantId);
-      params.append('format', format);
-
-      const response = await api.get(`/logs/export?${params.toString()}`, {
-        responseType: 'blob',
-      });
-
-      // Create download link
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      // Export using current logs (no backend export endpoint)
+      const content = format === 'json' 
+        ? JSON.stringify(logs, null, 2)
+        : logs.map(log => `${log.createdAt},${log.action},${log.entity},${log.user?.name || 'Sistema'}`).join('\n');
+      
+      const blob = new Blob([content], { type: format === 'json' ? 'application/json' : 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
       link.setAttribute('download', `audit-logs-${Date.now()}.${format}`);
@@ -125,9 +121,9 @@ export function useLogs() {
 
   const getLogDetails = useCallback(async (logId: string) => {
     try {
-      const response = await api.get(`/logs/${logId}`);
-      if (response.data.success) {
-        return response.data.data;
+      const response = await api.get(`/logs/audit/${logId}`);
+      if (response.success && response.data) {
+        return response.data as any;
       }
       return null;
     } catch (err) {

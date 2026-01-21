@@ -44,7 +44,7 @@ import { toast } from 'sonner';
 
 export default function TenantAIDashboard() {
   const [period, setPeriod] = useState('7d');
-  const { consumption, isLoading: consumptionLoading, fetchConsumption } = useAIConsumption();
+  const { consumption, isLoading: consumptionLoading, error: consumptionError, fetchConsumption } = useAIConsumption();
   const { limits, isLoading: limitsLoading, fetchLimits } = useAILimits();
 
   const isLoading = consumptionLoading || limitsLoading;
@@ -132,6 +132,11 @@ export default function TenantAIDashboard() {
       <TenantLayout>
         <Header />
         <div className="p-6 space-y-6">
+          {consumptionError && (
+            <div className="border border-border bg-cs-bg-card rounded-lg p-4 text-sm text-cs-text-secondary">
+              Não foi possível carregar parte dos dados de consumo de IA. Os demais widgets continuam disponíveis.
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <div>
               <Skeleton className="h-8 w-48 mb-2" />

@@ -59,17 +59,19 @@ import type { User, UserRole, Tenant } from '@/lib/apiTypes';
 // ============================================================================
 
 interface UsersResponse {
-  users: User[];
-  meta: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
+  items: User[];
+  total: number;
+  page: number;
+  limit: number;
+  hasMore: boolean;
 }
 
 interface TenantsResponse {
-  tenants: Tenant[];
+  items: Tenant[];
+  total: number;
+  page: number;
+  limit: number;
+  hasMore: boolean;
 }
 
 // ============================================================================
@@ -150,12 +152,14 @@ export default function Usuarios() {
         params.tenantId = currentUser.tenantId;
       }
       
-      const response = await api.get<UsersResponse>('/api/users', params);
+      const response = await api.get<UsersResponse>('/users', params);
       
       if (response.success && response.data) {
-        setUsers(response.data.users);
-        setTotalPages(response.data.meta.totalPages);
-        setTotalItems(response.data.meta.total);
+        const items = response.data.items || [];
+        setUsers(items);
+        setTotalItems(response.data.total || 0);
+        const limitValue = response.data.limit || 10;
+        setTotalPages(Math.max(1, Math.ceil((response.data.total || 0) / limitValue)));
       }
     } catch (error) {
       const apiError = error as ApiError;
@@ -165,10 +169,14 @@ export default function Usuarios() {
 
   const loadTenants = async () => {
     try {
-      const response = await api.get<TenantsResponse>('/api/tenants', { limit: 100 });
+      const response = await api.get<TenantsResponse>('/tenants', { limit: 100 });
       
       if (response.success && response.data) {
-        setTenants(response.data.tenants);
+        const items = (response.data.items || []).map((item: any) => ({
+          ...item,
+          planName: item.planName || item.plan || undefined,
+        }));
+        setTenants(items);
       }
     } catch (error) {
       console.error('Erro ao carregar tenants:', error);
@@ -272,7 +280,7 @@ export default function Usuarios() {
         payload.tenantId = formData.tenantId;
       }
       
-      await api.post('/api/users', payload);
+      await api.post('/users', payload);
       
       toast.success('Usuário criado com sucesso!');
       setIsCreateModalOpen(false);
@@ -314,7 +322,7 @@ export default function Usuarios() {
         payload.password = formData.password;
       }
       
-      await api.put(`/api/users/${selectedUser.id}`, payload);
+      await api.put(`/users/${selectedUser.id}`, payload);
       
       toast.success('Usuário atualizado com sucesso!');
       setIsEditModalOpen(false);
@@ -336,7 +344,7 @@ export default function Usuarios() {
     setIsSubmitting(true);
     
     try {
-      await api.delete(`/api/users/${selectedUser.id}`);
+      await api.delete(`/users/${selectedUser.id}`);
       
       toast.success('Usuário removido com sucesso!');
       setIsDeleteDialogOpen(false);
@@ -354,11 +362,7 @@ export default function Usuarios() {
 
   const handleToggleStatus = async (user: User) => {
     try {
-      const endpoint = user.isActive 
-        ? `/api/users/${user.id}/deactivate`
-        : `/api/users/${user.id}/activate`;
-      
-      await api.post(endpoint);
+      await api.put(`/users/${user.id}`, { isActive: !user.isActive });
       
       toast.success(user.isActive ? 'Usuário desativado!' : 'Usuário ativado!');
       

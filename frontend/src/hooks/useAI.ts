@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import api from '../lib/api';
 
 // ============================================================================
@@ -48,6 +49,51 @@ export interface AIConsumption {
     name: string;
     maxTokens: number;
   } | null;
+  // Optional normalized fields used by dashboards
+  totalTokens?: number;
+  totalTokensToday?: number;
+  totalTokensMonth?: number;
+  totalMessages?: number;
+  totalMessagesToday?: number;
+  estimatedCost?: number;
+  estimatedCostToday?: number;
+  estimatedCostMonth?: number;
+  avgResponseTime?: number | string;
+  tokenTrend?: number;
+  costTrend?: number;
+  messageTrend?: number;
+  trendData?: Array<{ date: string; tokens: number }>;
+  modelUsage?: Array<{ name: string; value: number; color?: string }>;
+  hourlyData?: Array<{ hour: string; messages: number }>;
+  topIntents?: Array<unknown>;
+  tenantConsumption?: Array<{
+    tenantId?: string;
+    tenantName?: string;
+    totalTokens: number;
+    totalMessages?: number;
+    estimatedCost?: number;
+    avgResponseTime?: number;
+  }>;
+  dailyUsage?: Array<{ date: string; messages: number; tokens: number; cost: number }>;
+  hourlyDistribution?: Array<{ hour: string; messages: number }>;
+  recentConversations?: Array<unknown>;
+  successRate?: number;
+  messagesGrowth?: number;
+  tokensGrowth?: number;
+  costGrowth?: number;
+  totalCost?: number;
+  totalTokensUsed?: number;
+  limit?: number;
+  percentage?: number;
+  byModel?: Array<unknown>;
+  byDay?: Array<unknown>;
+  tenantName?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  model?: string;
+  lastActivity?: string;
+  activeTenantsToday?: number;
+  topModel?: string;
 }
 
 export interface AITestResult {
@@ -150,24 +196,100 @@ interface UseAIConsumptionReturn {
   consumption: AIConsumption | null;
   isLoading: boolean;
   error: Error | null;
-  refetch: () => void;
+  refetch: (period?: string) => void;
+  fetchConsumption: (period?: string) => void;
 }
 
-export function useAIConsumption(period: string = '30d', tenantId?: string): UseAIConsumptionReturn {
+export function useAIConsumption(tenantId?: string, period: string = '30d'): UseAIConsumptionReturn {
+  const { user } = useAuth();
   const [consumption, setConsumption] = useState<AIConsumption | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
-  const fetchConsumption = useCallback(async () => {
+  const normalizeConsumption = useCallback((data: any, isGlobal: boolean): AIConsumption => {
+    const summary = data?.summary || {};
+    const usageByDay = (data?.usageByDay || []).map((item: any) => ({
+      ...item,
+      tokens: Number(item.tokens || 0),
+    }));
+    const totalTokens = summary.totalTokens || data?.totalTokens || 0;
+    const totalMessages = summary.aiMessages || data?.totalMessages || 0;
+    const lastDayTokens = usageByDay.length > 0 ? usageByDay[usageByDay.length - 1]?.tokens || 0 : 0;
+    const normalizedTenants = (data?.tenantConsumption || data?.tenants || []).map((tenant: any) => {
+      const tokens = Number(tenant.totalTokens ?? tenant.tokens ?? 0);
+      const cost = Number(tenant.estimatedCost ?? tenant.cost ?? 0);
+      const messages = Number(tenant.totalMessages ?? tenant.messages ?? 0);
+
+      return {
+        tenantId: tenant.tenantId ?? tenant.id,
+        tenantName: tenant.tenantName ?? tenant.name,
+        totalTokens: tokens,
+        totalMessages: messages,
+        estimatedCost: cost,
+        avgResponseTime: tenant.avgResponseTime ?? 0,
+        tokens,
+        cost,
+        messages,
+      };
+    });
+
+    return {
+      ...data,
+      totalTokens,
+      totalTokensMonth: totalTokens,
+      totalTokensToday: lastDayTokens,
+      totalMessages,
+      totalMessagesToday: 0,
+      totalCost: data?.totalCost || data?.estimatedCost || 0,
+      estimatedCost: data?.estimatedCost || data?.totalCost || 0,
+      estimatedCostToday: 0,
+      estimatedCostMonth: 0,
+      avgResponseTime: data?.avgResponseTime || 0,
+      tokenTrend: data?.tokenTrend || 0,
+      costTrend: data?.costTrend || 0,
+      messageTrend: data?.messageTrend || 0,
+      trendData: data?.trendData || usageByDay.map((item: any) => ({
+        date: item.date,
+        tokens: Number(item.tokens || 0),
+      })),
+      modelUsage: data?.modelUsage || [],
+      hourlyData: data?.hourlyData || [],
+      topIntents: data?.topIntents || [],
+      tenantConsumption: normalizedTenants,
+      dailyUsage: data?.dailyUsage || usageByDay.map((item: any) => ({
+        date: item.date,
+        messages: 0,
+        tokens: Number(item.tokens || 0),
+        cost: 0,
+      })),
+      hourlyDistribution: data?.hourlyDistribution || [],
+      recentConversations: data?.recentConversations || [],
+      successRate: data?.successRate || 0,
+      messagesGrowth: data?.messagesGrowth || 0,
+      tokensGrowth: data?.tokensGrowth || 0,
+      costGrowth: data?.costGrowth || 0,
+      totalTokensUsed: data?.totalTokensUsed || totalTokens,
+      limit: summary.limit || data?.limit || 0,
+      percentage: summary.percentage || data?.percentage || 0,
+      byModel: data?.byModel || [],
+      byDay: data?.byDay || [],
+      activeTenantsToday: isGlobal ? summary.activeTenants || data?.activeTenantsToday || normalizedTenants.length : undefined,
+      topModel: data?.topModel || 'gpt-4',
+    } as AIConsumption;
+  }, []);
+
+  const fetchConsumption = useCallback(async (customPeriod?: string) => {
     try {
       setIsLoading(true);
       setError(null);
-      const params: Record<string, string> = { period };
+      const params: Record<string, string> = { period: customPeriod || period };
       if (tenantId) params.tenantId = tenantId;
 
-      const response = await api.get('/ai/consumption', params);
+      const isGlobal = user?.role === 'superadmin' && !tenantId;
+      const endpoint = isGlobal ? '/reports/ai-consumption/global' : '/ai/consumption';
+      const response = await api.get(endpoint, params);
       if (response.success && response.data) {
-        setConsumption(response.data as AIConsumption);
+        setConsumption(normalizeConsumption(response.data, isGlobal));
       }
     } catch (err: any) {
       // For superadmin without tenant context, return fallback data silently
@@ -176,24 +298,26 @@ export function useAIConsumption(period: string = '30d', tenantId?: string): Use
         setError(err instanceof Error ? err : new Error('Erro ao carregar consumo de AI'));
       }
       // Set fallback data
-      setConsumption({
-        totalTokensUsed: 0,
-        totalCost: 0,
-        limit: 100000,
-        percentage: 0,
-        byModel: [],
-        byDay: [],
-      });
+      setConsumption(normalizeConsumption({
+        summary: {
+          totalTokens: 0,
+          limit: 100000,
+          percentage: 0,
+          aiMessages: 0,
+          avgTokensPerMessage: 0,
+        },
+        usageByDay: [],
+      }, user?.role === 'superadmin' && !tenantId));
     } finally {
       setIsLoading(false);
     }
-  }, [period, tenantId]);
+  }, [normalizeConsumption, period, tenantId, user?.role]);
 
   useEffect(() => {
     fetchConsumption();
   }, [fetchConsumption]);
 
-  return { consumption, isLoading, error, refetch: fetchConsumption };
+  return { consumption, isLoading, error, refetch: fetchConsumption, fetchConsumption };
 }
 
 // ============================================================================

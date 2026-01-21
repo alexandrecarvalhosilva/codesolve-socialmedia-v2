@@ -63,17 +63,19 @@ import type { Tenant, TenantStatus, BillingPlan, User } from '@/lib/apiTypes';
 // ============================================================================
 
 interface TenantsResponse {
-  tenants: Tenant[];
-  meta: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
+  items: Tenant[];
+  total: number;
+  page: number;
+  limit: number;
+  hasMore: boolean;
 }
 
 interface UsersResponse {
-  users: User[];
+  items: User[];
+  total: number;
+  page: number;
+  limit: number;
+  hasMore: boolean;
 }
 
 interface PlansResponse {
@@ -157,16 +159,22 @@ export default function Tenants() {
 
   const loadTenants = async (page = 1, search = '') => {
     try {
-      const response = await api.get<TenantsResponse>('/api/tenants', {
+      const response = await api.get<TenantsResponse>('/tenants', {
         page,
         limit: 10,
         search: search || undefined,
       });
       
       if (response.success && response.data) {
-        setTenants(response.data.tenants);
-        setTotalPages(response.data.meta.totalPages);
-        setTotalItems(response.data.meta.total);
+        const items = (response.data.items || []).map((item: any) => ({
+          ...item,
+          planName: item.planName || item.plan || undefined,
+          whatsappInstancesCount: item.whatsappInstancesCount ?? item.instancesCount,
+        }));
+        setTenants(items);
+        setTotalItems(response.data.total || 0);
+        const limitValue = response.data.limit || 10;
+        setTotalPages(Math.max(1, Math.ceil((response.data.total || 0) / limitValue)));
       }
     } catch (error) {
       const apiError = error as ApiError;
@@ -176,13 +184,13 @@ export default function Tenants() {
 
   const loadUsers = async () => {
     try {
-      const response = await api.get<UsersResponse>('/api/users', {
+      const response = await api.get<UsersResponse>('/users', {
         limit: 100,
         role: 'admin',
       });
       
       if (response.success && response.data) {
-        setUsers(response.data.users);
+        setUsers(response.data.items || []);
       }
     } catch (error) {
       console.error('Erro ao carregar usuários:', error);
@@ -191,10 +199,14 @@ export default function Tenants() {
 
   const loadPlans = async () => {
     try {
-      const response = await api.get<PlansResponse>('/api/billing/plans');
+      const response = await api.get<PlansResponse>('/billing/plans');
       
       if (response.success && response.data) {
-        setPlans(response.data.plans);
+        if (Array.isArray(response.data)) {
+          setPlans(response.data);
+        } else {
+          setPlans(response.data.plans || []);
+        }
       }
     } catch (error) {
       console.error('Erro ao carregar planos:', error);
@@ -273,7 +285,7 @@ export default function Tenants() {
     setIsCreating(true);
     
     try {
-      const response = await api.post<{ tenant: Tenant }>('/api/tenants', {
+      const response = await api.post<{ tenant: Tenant }>('/tenants', {
         name: newTenantName.trim(),
         slug: newTenantSlug || generateSlug(newTenantName),
         planId: selectedPlan || undefined,
@@ -324,7 +336,7 @@ export default function Tenants() {
     setIsDeleting(true);
     
     try {
-      await api.delete(`/api/tenants/${tenantToDelete.id}`);
+      await api.delete(`/tenants/${tenantToDelete.id}`);
       
       toast.success(`Tenant "${tenantToDelete.name}" removido com sucesso!`);
       setTenantToDelete(null);
@@ -350,7 +362,7 @@ export default function Tenants() {
     const action = tenant.status === 'active' ? 'suspend' : 'activate';
     
     try {
-      await api.post(`/api/tenants/${tenant.id}/${action}`);
+      await api.post(`/tenants/${tenant.id}/${action}`);
       
       toast.success(
         action === 'activate' 

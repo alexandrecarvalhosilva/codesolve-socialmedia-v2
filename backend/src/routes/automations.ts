@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../config/database.js';
 import { authenticate, requirePermission, requireTenantMembership } from '../middleware/auth.js';
+import { getClientIp } from '../utils/request.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -265,7 +266,7 @@ router.post('/', authenticate, requirePermission('automations:create'), requireT
         entity: 'automation',
         entityId: automation.id,
         newValue: { name, trigger },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
@@ -360,7 +361,7 @@ router.put('/:id', authenticate, requirePermission('automations:edit'), async (r
         entityId: id,
         oldValue,
         newValue: { name, trigger },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
@@ -468,7 +469,7 @@ router.post('/:id/toggle', authenticate, requirePermission('automations:edit'), 
         entityId: id,
         oldValue: { status: automation.status },
         newValue: { status: newStatus },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
@@ -545,7 +546,7 @@ router.delete('/:id', authenticate, requirePermission('automations:delete'), asy
         entity: 'automation',
         entityId: id,
         oldValue: { name: automation.name },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });

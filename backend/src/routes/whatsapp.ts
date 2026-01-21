@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../config/database.js';
 import { authenticate, requirePermission, requireTenantMembership } from '../middleware/auth.js';
+import { getClientIp } from '../utils/request.js';
 import { cacheQRCode, getCachedQRCode } from '../config/redis.js';
 import { v4 as uuidv4 } from 'uuid';
 import evolutionApi, { 
@@ -370,7 +371,7 @@ router.post('/instances', authenticate, requirePermission('whatsapp:instances:cr
         entity: 'whatsapp_instance',
         entityId: instance.id,
         newValue: { name, evolutionInstanceId },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
@@ -571,7 +572,7 @@ router.post('/instances/:id/disconnect', authenticate, requirePermission('whatsa
         action: 'whatsapp.instance.disconnected',
         entity: 'whatsapp_instance',
         entityId: instance.id,
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
@@ -658,7 +659,7 @@ router.delete('/instances/:id', authenticate, requirePermission('whatsapp:instan
         entity: 'whatsapp_instance',
         entityId: instance.id,
         oldValue: { name: instance.name },
-        ipAddress: req.ip,
+        ipAddress: getClientIp(req),
         userAgent: req.headers['user-agent'],
       },
     });
