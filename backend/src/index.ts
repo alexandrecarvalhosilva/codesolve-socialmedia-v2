@@ -9,6 +9,7 @@ import { env, validateEnv } from './config/env.js';
 import { testDatabaseConnection, disconnectDatabase } from './config/database.js';
 import { testRedisConnection, disconnectRedis } from './config/redis.js';
 import { apiRateLimit } from './middleware/rateLimit.js';
+import { setIO } from './config/socket.js';
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -23,6 +24,7 @@ import logsRoutes from './routes/logs.js';
 import notificationsRoutes from './routes/notifications.js';
 import supportRoutes from './routes/support.js';
 import healthRoutes from './routes/health.js';
+import webhookRoutes from './routes/webhook.js';
 
 // Validate environment
 validateEnv();
@@ -39,6 +41,9 @@ const io = new SocketIOServer(httpServer, {
     credentials: true,
   },
 });
+
+// Set IO for use in other modules
+setIO(io);
 
 // ============================================================================
 // MIDDLEWARE
@@ -94,6 +99,9 @@ if (env.NODE_ENV === 'development') {
 
 // Health check (no rate limit)
 app.use('/api/health', healthRoutes);
+
+// Webhook routes (no rate limit, no auth - receives events from Evolution API)
+app.use('/api/webhook', webhookRoutes);
 
 // Apply rate limiting to API routes
 app.use('/api', apiRateLimit);
@@ -233,6 +241,7 @@ async function startServer() {
 ║   Endpoints:                                                   ║
 ║   - Health: GET /api/health                                    ║
 ║   - Auth: POST /api/auth/login                                 ║
+║   - Webhook: POST /api/webhook/evolution                       ║
 ║   - API Docs: Coming soon...                                   ║
 ║                                                                ║
 ╚════════════════════════════════════════════════════════════════╝
