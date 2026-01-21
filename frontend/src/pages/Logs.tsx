@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
-import { FileText, Search, Filter, Download, Eye, Trash2, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { FileText, Search, Filter, Download, Eye, Trash2, AlertTriangle, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { DashboardLayout } from '@/layouts/DashboardLayout';
 import { Header } from '@/components/dashboard/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { StatusPill } from '@/components/dashboard/StatusPill';
 import { EmptyState, EmptySearchState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -34,267 +36,140 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from '@/hooks/use-toast';
+import { useLogs, AuditLog } from '@/hooks/useLogs';
 
-interface LogEntry {
-  id: string;
-  timestamp: string;
-  user: string;
-  action: string;
-  resource: string;
-  status: 'success' | 'error' | 'warning';
-  ip: string;
-  details?: string;
-  userAgent?: string;
-  duration?: string;
-}
+// Map action to status for display
+const getStatusFromAction = (action: string): 'success' | 'error' | 'warning' => {
+  const errorActions = ['DELETE', 'ERROR', 'FAILED', 'BLOCK'];
+  const warningActions = ['WARNING', 'RESET', 'SUSPEND'];
+  
+  if (errorActions.some(a => action.toUpperCase().includes(a))) return 'error';
+  if (warningActions.some(a => action.toUpperCase().includes(a))) return 'warning';
+  return 'success';
+};
 
-const initialLogs: LogEntry[] = [
-  { 
-    id: '1', 
-    timestamp: '19/01/2026 14:32:15', 
-    user: 'João Silva', 
-    action: 'LOGIN', 
-    resource: 'Sistema', 
-    status: 'success', 
-    ip: '192.168.1.100',
-    details: 'Login realizado com sucesso via autenticação JWT',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
-    duration: '245ms'
-  },
-  { 
-    id: '2', 
-    timestamp: '19/01/2026 14:30:45', 
-    user: 'Maria Santos', 
-    action: 'TENANT_CREATE', 
-    resource: 'Tenant: Empresa XYZ', 
-    status: 'success', 
-    ip: '192.168.1.101',
-    details: 'Novo tenant criado com configurações padrão',
-    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15',
-    duration: '1.2s'
-  },
-  { 
-    id: '3', 
-    timestamp: '19/01/2026 14:28:22', 
-    user: 'Sistema', 
-    action: 'SYNC', 
-    resource: 'Google Calendar', 
-    status: 'success', 
-    ip: '-',
-    details: 'Sincronização automática de 45 eventos concluída',
-    duration: '3.5s'
-  },
-  { 
-    id: '4', 
-    timestamp: '19/01/2026 14:25:10', 
-    user: 'Pedro Costa', 
-    action: 'ROLE_CHANGE', 
-    resource: 'Usuário: Ana Lima', 
-    status: 'success', 
-    ip: '192.168.1.102',
-    details: 'Alteração de permissões: Operador → Admin',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Firefox/121.0',
-    duration: '189ms'
-  },
-  { 
-    id: '5', 
-    timestamp: '19/01/2026 14:20:33', 
-    user: 'API', 
-    action: 'WEBHOOK', 
-    resource: 'WhatsApp', 
-    status: 'error', 
-    ip: '-',
-    details: 'Erro 500: Falha na conexão com Evolution API - Timeout após 30s',
-    duration: '30.1s'
-  },
-  { 
-    id: '6', 
-    timestamp: '19/01/2026 14:15:00', 
-    user: 'Sistema', 
-    action: 'BACKUP', 
-    resource: 'Database', 
-    status: 'success', 
-    ip: '-',
-    details: 'Backup completo do banco de dados (2.3GB)',
-    duration: '45.2s'
-  },
-  { 
-    id: '7', 
-    timestamp: '19/01/2026 14:10:22', 
-    user: 'Carlos Souza', 
-    action: 'USER_DELETE', 
-    resource: 'Usuário: João Teste', 
-    status: 'warning', 
-    ip: '192.168.1.103',
-    details: 'Usuário removido - histórico de ações preservado para auditoria',
-    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) Mobile/15E148',
-    duration: '312ms'
-  },
-  { 
-    id: '8', 
-    timestamp: '19/01/2026 14:05:11', 
-    user: 'Ana Lima', 
-    action: 'EXPORT', 
-    resource: 'Relatório Mensal', 
-    status: 'success', 
-    ip: '192.168.1.104',
-    details: 'Relatório exportado em formato PDF (1.2MB)',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
-    duration: '2.8s'
-  },
-  { 
-    id: '9', 
-    timestamp: '19/01/2026 13:55:00', 
-    user: 'Admin Master', 
-    action: 'PLAN_UPGRADE', 
-    resource: 'Tenant: SIX BLADES', 
-    status: 'success', 
-    ip: '192.168.1.100',
-    details: 'Upgrade de plano: Professional → Business',
-    duration: '1.5s'
-  },
-  { 
-    id: '10', 
-    timestamp: '19/01/2026 13:50:30', 
-    user: 'Sistema', 
-    action: 'AI_CONFIG', 
-    resource: 'Config IA: SIX BLADES', 
-    status: 'success', 
-    ip: '-',
-    details: 'Limite de tokens alterado: 50.000 → 100.000/mês',
-    duration: '89ms'
-  },
-  { 
-    id: '11', 
-    timestamp: '19/01/2026 13:45:15', 
-    user: 'Maria Santos', 
-    action: 'MODULE_ADD', 
-    resource: 'Módulo: SLA Premium', 
-    status: 'success', 
-    ip: '192.168.1.101',
-    details: 'Módulo SLA Premium adicionado ao tenant TECH CORP',
-    duration: '456ms'
-  },
-  { 
-    id: '12', 
-    timestamp: '19/01/2026 13:40:00', 
-    user: 'João Silva', 
-    action: 'INVITE_SENT', 
-    resource: 'Usuário: novo@email.com', 
-    status: 'success', 
-    ip: '192.168.1.100',
-    details: 'Convite enviado para novo usuário com perfil Operador',
-    duration: '890ms'
-  },
-  { 
-    id: '13', 
-    timestamp: '19/01/2026 13:35:22', 
-    user: 'Sistema', 
-    action: 'TEMPLATE_SELECT', 
-    resource: 'Template: Academia Jiu-Jitsu', 
-    status: 'success', 
-    ip: '-',
-    details: 'Template de nicho selecionado durante onboarding',
-    duration: '123ms'
-  },
-  { 
-    id: '14', 
-    timestamp: '19/01/2026 13:30:00', 
-    user: 'Pedro Costa', 
-    action: 'PASSWORD_RESET', 
-    resource: 'Usuário: ana.lima@empresa.com', 
-    status: 'warning', 
-    ip: '192.168.1.102',
-    details: 'Solicitação de reset de senha enviada por email',
-    duration: '567ms'
-  },
-  { 
-    id: '15', 
-    timestamp: '19/01/2026 13:25:45', 
-    user: 'API', 
-    action: 'AUTOMATION_RUN', 
-    resource: 'Automação: Boas-vindas', 
-    status: 'success', 
-    ip: '-',
-    details: 'Fluxo de boas-vindas executado para 12 novos contatos',
-    duration: '2.3s'
-  },
-];
+// Format date for display
+const formatDate = (dateString: string) => {
+  try {
+    const date = new Date(dateString);
+    return date.toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch {
+    return dateString;
+  }
+};
 
 export default function Logs() {
   const { toast } = useToast();
-  const [logs, setLogs] = useState<LogEntry[]>(initialLogs);
+  const { logs, total, page, totalPages, isLoading, error, fetchLogs, exportLogs, setPage } = useLogs();
+  
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
+  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [deleteLogId, setDeleteLogId] = useState<string | null>(null);
   const [clearAllOpen, setClearAllOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
+  
+  // Filters
+  const [actionFilter, setActionFilter] = useState<string>('');
+  const [entityFilter, setEntityFilter] = useState<string>('');
+  const [dateFilter, setDateFilter] = useState<string>('');
 
-  // Simula carregamento
+  // Fetch logs on mount and when filters change
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 800);
-    return () => clearTimeout(timer);
-  }, []);
+    const filters: Record<string, string | number> = { page, limit: 20 };
+    if (actionFilter) filters.action = actionFilter;
+    if (entityFilter) filters.entity = entityFilter;
+    if (dateFilter) {
+      const now = new Date();
+      let startDate: Date;
+      switch (dateFilter) {
+        case 'today':
+          startDate = new Date(now.setHours(0, 0, 0, 0));
+          break;
+        case 'week':
+          startDate = new Date(now.setDate(now.getDate() - 7));
+          break;
+        case 'month':
+          startDate = new Date(now.setMonth(now.getMonth() - 1));
+          break;
+        default:
+          startDate = new Date(0);
+      }
+      filters.startDate = startDate.toISOString();
+    }
+    fetchLogs(filters);
+  }, [fetchLogs, page, actionFilter, entityFilter, dateFilter]);
 
+  // Filter logs by search term (client-side)
   const filteredLogs = logs.filter(log => 
-    log.user.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (log.user?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    log.resource.toLowerCase().includes(searchTerm.toLowerCase())
+    log.entity.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleViewLog = (log: LogEntry) => {
+  const handleViewLog = (log: AuditLog) => {
     setSelectedLog(log);
     setViewModalOpen(true);
   };
 
   const handleDeleteLog = (logId: string) => {
-    setLogs(prev => prev.filter(l => l.id !== logId));
+    // Note: API doesn't support individual log deletion for audit purposes
+    // This is just for UI demonstration
     setDeleteLogId(null);
     toast({
-      title: "Log removido",
-      description: "O evento foi removido do histórico.",
+      title: "Operação não permitida",
+      description: "Logs de auditoria não podem ser removidos individualmente por questões de compliance.",
+      variant: "destructive",
     });
   };
 
   const handleClearAll = () => {
-    setLogs([]);
     setClearAllOpen(false);
     toast({
-      title: "Logs limpos",
-      description: "Todos os eventos foram removidos do histórico.",
+      title: "Operação não permitida",
+      description: "Logs de auditoria não podem ser limpos por questões de compliance.",
+      variant: "destructive",
     });
   };
 
-  const handleExport = () => {
-    // Gera CSV real dos logs
-    const headers = ['Timestamp', 'Usuário', 'Ação', 'Recurso', 'Status', 'IP', 'Detalhes'];
-    const csvContent = [
-      headers.join(','),
-      ...logs.map(log => [
-        log.timestamp,
-        log.user,
-        log.action,
-        log.resource,
-        log.status,
-        log.ip,
-        log.details || ''
-      ].map(field => `"${field}"`).join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `logs_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-    
-    toast({
-      title: "Logs exportados",
-      description: "O arquivo CSV foi baixado com sucesso.",
-    });
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      await exportLogs({
+        action: actionFilter,
+        entity: entityFilter,
+      }, 'csv');
+      toast({
+        title: "Logs exportados",
+        description: "O arquivo CSV foi baixado com sucesso.",
+      });
+    } catch (err) {
+      toast({
+        title: "Erro ao exportar",
+        description: "Não foi possível exportar os logs.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
-  if (isLoading) {
+  const handleRefresh = () => {
+    fetchLogs({ page, limit: 20 });
+  };
+
+  // Get unique actions and entities for filters
+  const uniqueActions = [...new Set(logs.map(l => l.action))];
+  const uniqueEntities = [...new Set(logs.map(l => l.entity))];
+
+  if (isLoading && logs.length === 0) {
     return (
       <DashboardLayout>
         <Header />
@@ -334,12 +209,12 @@ export default function Logs() {
                   <Skeleton className="h-4 w-36" />
                   <Skeleton className="h-4 w-24" />
                   <Skeleton className="h-6 w-16 rounded" />
-                  <Skeleton className="h-4 w-32" />
-                  <Skeleton className="h-6 w-12 rounded-full" />
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-6 w-16 rounded" />
                   <Skeleton className="h-4 w-28" />
-                  <div className="ml-auto flex gap-2">
-                    <Skeleton className="h-8 w-8 rounded-md" />
-                    <Skeleton className="h-8 w-8 rounded-md" />
+                  <div className="flex gap-2 ml-auto">
+                    <Skeleton className="h-8 w-8 rounded" />
+                    <Skeleton className="h-8 w-8 rounded" />
                   </div>
                 </div>
               ))}
@@ -354,101 +229,160 @@ export default function Logs() {
     <DashboardLayout>
       <Header />
       
-      <div className="p-8 space-y-6 opacity-0 animate-enter" style={{ animationFillMode: 'forwards' }}>
+      <div className="p-8 space-y-6 animate-fade-in">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-bold text-cs-text-primary flex items-center gap-3">
               <FileText className="w-7 h-7 text-cs-cyan" />
-              Logs do Sistema
+              Logs de Auditoria
             </h2>
-            <p className="text-cs-text-secondary mt-1">Histórico de atividades e eventos</p>
+            <p className="text-cs-text-secondary mt-1">
+              Histórico de ações do sistema ({total} registros)
+            </p>
           </div>
           
           <div className="flex gap-2">
             <Button 
               variant="outline" 
-              className="border-destructive/50 text-destructive hover:bg-destructive/10"
-              onClick={() => setClearAllOpen(true)}
-              disabled={logs.length === 0}
+              className="border-border text-cs-text-secondary"
+              onClick={handleRefresh}
+              disabled={isLoading}
             >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Limpar Todos
+              <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+              Atualizar
             </Button>
             <Button 
               variant="outline" 
               className="border-border text-cs-text-secondary"
               onClick={handleExport}
+              disabled={isExporting}
             >
               <Download className="w-4 h-4 mr-2" />
-              Exportar
+              {isExporting ? 'Exportando...' : 'Exportar'}
             </Button>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        {/* Filters */}
+        <div className="flex flex-wrap items-center gap-4">
           <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cs-text-muted" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-cs-text-muted" />
             <Input
-              placeholder="Buscar logs..."
+              placeholder="Buscar por usuário, ação ou recurso..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 bg-cs-bg-card border-border text-cs-text-primary"
             />
           </div>
-          <Button variant="outline" className="border-border text-cs-text-secondary">
-            <Filter className="w-4 h-4 mr-2" />
-            Filtros
-          </Button>
+          
+          <Select value={actionFilter} onValueChange={setActionFilter}>
+            <SelectTrigger className="w-40 bg-cs-bg-card border-border text-cs-text-primary">
+              <SelectValue placeholder="Ação" />
+            </SelectTrigger>
+            <SelectContent className="bg-cs-bg-card border-border">
+              <SelectItem value="" className="text-cs-text-primary">Todas as ações</SelectItem>
+              {uniqueActions.map(action => (
+                <SelectItem key={action} value={action} className="text-cs-text-primary">
+                  {action}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={entityFilter} onValueChange={setEntityFilter}>
+            <SelectTrigger className="w-40 bg-cs-bg-card border-border text-cs-text-primary">
+              <SelectValue placeholder="Entidade" />
+            </SelectTrigger>
+            <SelectContent className="bg-cs-bg-card border-border">
+              <SelectItem value="" className="text-cs-text-primary">Todas as entidades</SelectItem>
+              {uniqueEntities.map(entity => (
+                <SelectItem key={entity} value={entity} className="text-cs-text-primary">
+                  {entity}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={dateFilter} onValueChange={setDateFilter}>
+            <SelectTrigger className="w-40 bg-cs-bg-card border-border text-cs-text-primary">
+              <SelectValue placeholder="Período" />
+            </SelectTrigger>
+            <SelectContent className="bg-cs-bg-card border-border">
+              <SelectItem value="" className="text-cs-text-primary">Todo período</SelectItem>
+              <SelectItem value="today" className="text-cs-text-primary">Hoje</SelectItem>
+              <SelectItem value="week" className="text-cs-text-primary">Última semana</SelectItem>
+              <SelectItem value="month" className="text-cs-text-primary">Último mês</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
-        <div className="bg-cs-bg-card border border-border rounded-xl overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="text-cs-text-secondary">Timestamp</TableHead>
-                <TableHead className="text-cs-text-secondary">Usuário</TableHead>
-                <TableHead className="text-cs-text-secondary">Ação</TableHead>
-                <TableHead className="text-cs-text-secondary">Recurso</TableHead>
-                <TableHead className="text-cs-text-secondary">Status</TableHead>
-                <TableHead className="text-cs-text-secondary">IP</TableHead>
-                <TableHead className="text-cs-text-secondary text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredLogs.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="h-32">
-                    {searchTerm ? (
-                      <EmptySearchState onClear={() => setSearchTerm('')} />
-                    ) : (
-                      <EmptyState
-                        icon={FileText}
-                        title="Nenhum log registrado"
-                        description="Eventos do sistema aparecerão aqui quando ocorrerem"
-                      />
-                    )}
-                  </TableCell>
+        {/* Error State */}
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-red-400" />
+            <p className="text-red-400">{error}</p>
+            <Button variant="outline" size="sm" onClick={handleRefresh} className="ml-auto">
+              Tentar novamente
+            </Button>
+          </div>
+        )}
+
+        {/* Table */}
+        {filteredLogs.length === 0 && !isLoading ? (
+          searchTerm ? (
+            <EmptySearchState 
+              searchTerm={searchTerm}
+              onClear={() => setSearchTerm('')}
+            />
+          ) : (
+            <EmptyState
+              icon={FileText}
+              title="Nenhum log encontrado"
+              description="Os logs de auditoria aparecerão aqui conforme as ações são realizadas no sistema."
+            />
+          )
+        ) : (
+          <div className="bg-cs-bg-card border border-border rounded-xl overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent border-border">
+                  <TableHead className="text-cs-text-secondary">Data/Hora</TableHead>
+                  <TableHead className="text-cs-text-secondary">Usuário</TableHead>
+                  <TableHead className="text-cs-text-secondary">Ação</TableHead>
+                  <TableHead className="text-cs-text-secondary">Entidade</TableHead>
+                  <TableHead className="text-cs-text-secondary">Status</TableHead>
+                  <TableHead className="text-cs-text-secondary">IP</TableHead>
+                  <TableHead className="text-right text-cs-text-secondary">Ações</TableHead>
                 </TableRow>
-              ) : (
-                filteredLogs.map((log) => (
+              </TableHeader>
+              <TableBody>
+                {filteredLogs.map((log) => (
                   <TableRow key={log.id} className="border-border hover:bg-cs-bg-card-hover">
-                    <TableCell className="font-mono text-sm text-cs-text-muted">{log.timestamp}</TableCell>
-                    <TableCell className="text-cs-text-primary">{log.user}</TableCell>
+                    <TableCell className="text-cs-text-muted font-mono text-sm">
+                      {formatDate(log.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-cs-text-primary">
+                      {log.user?.name || 'Sistema'}
+                    </TableCell>
                     <TableCell>
                       <span className="px-2 py-1 rounded text-xs font-medium bg-cs-bg-primary text-cs-text-secondary">
                         {log.action}
                       </span>
                     </TableCell>
-                    <TableCell className="text-cs-text-secondary">{log.resource}</TableCell>
-                    <TableCell>
-                      <StatusPill 
-                        status={log.status === 'success' ? 'success' : log.status === 'error' ? 'error' : 'warning'}
-                        label={log.status === 'success' ? 'OK' : log.status === 'error' ? 'Erro' : 'Aviso'}
-                      />
+                    <TableCell className="text-cs-text-secondary">
+                      {log.entity}
+                      {log.entityId && (
+                        <span className="text-cs-text-muted ml-1">#{log.entityId.slice(0, 8)}</span>
+                      )}
                     </TableCell>
-                    <TableCell className="font-mono text-sm text-cs-text-muted">{log.ip}</TableCell>
+                    <TableCell>
+                      <StatusPill status={getStatusFromAction(log.action)} />
+                    </TableCell>
+                    <TableCell className="text-cs-text-muted font-mono text-sm">
+                      {log.ipAddress || '-'}
+                    </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex justify-end gap-1">
                         <Button 
                           variant="ghost" 
                           size="icon" 
@@ -457,22 +391,45 @@ export default function Logs() {
                         >
                           <Eye className="w-4 h-4" />
                         </Button>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-cs-text-muted hover:text-red-400"
-                          onClick={() => setDeleteLogId(log.id)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                ))}
+              </TableBody>
+            </Table>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+                <p className="text-sm text-cs-text-muted">
+                  Página {page} de {totalPages} ({total} registros)
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(page - 1)}
+                    disabled={page <= 1}
+                    className="border-border"
+                  >
+                    <ChevronLeft className="w-4 h-4 mr-1" />
+                    Anterior
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage(page + 1)}
+                    disabled={page >= totalPages}
+                    className="border-border"
+                  >
+                    Próxima
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* View Log Modal */}
@@ -481,69 +438,70 @@ export default function Logs() {
           <DialogHeader>
             <DialogTitle className="text-cs-text-primary flex items-center gap-2">
               <Eye className="w-5 h-5 text-cs-cyan" />
-              Detalhes do Evento
+              Detalhes do Log
             </DialogTitle>
             <DialogDescription className="text-cs-text-secondary">
-              Informações completas do log
+              Informações completas do evento de auditoria
             </DialogDescription>
           </DialogHeader>
 
           {selectedLog && (
-            <div className="space-y-4">
+            <div className="space-y-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-cs-text-muted">Timestamp</label>
-                  <p className="text-sm text-cs-text-primary font-mono">{selectedLog.timestamp}</p>
+                  <Label className="text-cs-text-muted text-xs">Data/Hora</Label>
+                  <p className="text-cs-text-primary font-mono text-sm">
+                    {formatDate(selectedLog.createdAt)}
+                  </p>
                 </div>
                 <div>
-                  <label className="text-xs text-cs-text-muted">Usuário</label>
-                  <p className="text-sm text-cs-text-primary">{selectedLog.user}</p>
+                  <Label className="text-cs-text-muted text-xs">Usuário</Label>
+                  <p className="text-cs-text-primary">{selectedLog.user?.name || 'Sistema'}</p>
                 </div>
                 <div>
-                  <label className="text-xs text-cs-text-muted">Ação</label>
-                  <span className="inline-block px-2 py-1 rounded text-xs font-medium bg-cs-bg-primary text-cs-text-secondary">
+                  <Label className="text-cs-text-muted text-xs">Ação</Label>
+                  <span className="px-2 py-1 rounded text-xs font-medium bg-cs-bg-primary text-cs-text-secondary">
                     {selectedLog.action}
                   </span>
                 </div>
                 <div>
-                  <label className="text-xs text-cs-text-muted">Status</label>
-                  <div className="mt-1">
-                    <StatusPill 
-                      status={selectedLog.status === 'success' ? 'success' : selectedLog.status === 'error' ? 'error' : 'warning'}
-                      label={selectedLog.status === 'success' ? 'OK' : selectedLog.status === 'error' ? 'Erro' : 'Aviso'}
-                    />
-                  </div>
+                  <Label className="text-cs-text-muted text-xs">Status</Label>
+                  <StatusPill status={getStatusFromAction(selectedLog.action)} />
                 </div>
               </div>
 
               <div>
-                <label className="text-xs text-cs-text-muted">Recurso</label>
-                <p className="text-sm text-cs-text-primary">{selectedLog.resource}</p>
+                <Label className="text-cs-text-muted text-xs">Entidade</Label>
+                <p className="text-cs-text-primary">
+                  {selectedLog.entity}
+                  {selectedLog.entityId && (
+                    <span className="text-cs-text-muted ml-1">({selectedLog.entityId})</span>
+                  )}
+                </p>
               </div>
 
               <div>
-                <label className="text-xs text-cs-text-muted">IP de Origem</label>
-                <p className="text-sm text-cs-text-primary font-mono">{selectedLog.ip}</p>
+                <Label className="text-cs-text-muted text-xs">Endereço IP</Label>
+                <p className="text-cs-text-primary font-mono text-sm">
+                  {selectedLog.ipAddress || 'Não disponível'}
+                </p>
               </div>
-
-              {selectedLog.duration && (
-                <div>
-                  <label className="text-xs text-cs-text-muted">Duração</label>
-                  <p className="text-sm text-cs-text-primary">{selectedLog.duration}</p>
-                </div>
-              )}
 
               {selectedLog.userAgent && (
                 <div>
-                  <label className="text-xs text-cs-text-muted">User Agent</label>
-                  <p className="text-xs text-cs-text-secondary font-mono break-all">{selectedLog.userAgent}</p>
+                  <Label className="text-cs-text-muted text-xs">User Agent</Label>
+                  <p className="text-cs-text-secondary text-sm break-all">
+                    {selectedLog.userAgent}
+                  </p>
                 </div>
               )}
 
-              {selectedLog.details && (
+              {selectedLog.metadata && Object.keys(selectedLog.metadata).length > 0 && (
                 <div>
-                  <label className="text-xs text-cs-text-muted">Detalhes</label>
-                  <p className="text-sm text-cs-text-secondary bg-cs-bg-primary p-3 rounded-lg">{selectedLog.details}</p>
+                  <Label className="text-cs-text-muted text-xs">Metadados</Label>
+                  <pre className="bg-cs-bg-primary p-3 rounded-lg text-xs text-cs-text-secondary overflow-auto max-h-32">
+                    {JSON.stringify(selectedLog.metadata, null, 2)}
+                  </pre>
                 </div>
               )}
             </div>
@@ -557,54 +515,38 @@ export default function Logs() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Single Log Confirmation */}
+      {/* Delete Log Confirmation */}
       <AlertDialog open={!!deleteLogId} onOpenChange={() => setDeleteLogId(null)}>
         <AlertDialogContent className="bg-cs-bg-card border-border">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-cs-text-primary flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-yellow-500" />
-              Remover Evento
+              <AlertTriangle className="w-5 h-5 text-cs-warning" />
+              Remover Log
             </AlertDialogTitle>
             <AlertDialogDescription className="text-cs-text-secondary">
-              Tem certeza que deseja remover este evento do histórico? Esta ação não pode ser desfeita.
+              Logs de auditoria são protegidos e não podem ser removidos individualmente por questões de compliance e segurança.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-transparent border-border text-cs-text-secondary hover:bg-cs-bg-card-hover">
-              Cancelar
-            </AlertDialogCancel>
-            <AlertDialogAction 
-              className="bg-red-500 hover:bg-red-600"
-              onClick={() => deleteLogId && handleDeleteLog(deleteLogId)}
-            >
-              Remover
-            </AlertDialogAction>
+            <AlertDialogCancel className="border-border">Entendi</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Clear All Logs Confirmation */}
+      {/* Clear All Confirmation */}
       <AlertDialog open={clearAllOpen} onOpenChange={setClearAllOpen}>
         <AlertDialogContent className="bg-cs-bg-card border-border">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-cs-text-primary flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-red-500" />
+              <AlertTriangle className="w-5 h-5 text-cs-warning" />
               Limpar Todos os Logs
             </AlertDialogTitle>
             <AlertDialogDescription className="text-cs-text-secondary">
-              Tem certeza que deseja remover TODOS os eventos do histórico? Esta ação é irreversível e removerá {logs.length} registros.
+              Logs de auditoria são protegidos e não podem ser limpos por questões de compliance e segurança.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="bg-transparent border-border text-cs-text-secondary hover:bg-cs-bg-card-hover">
-              Cancelar
-            </AlertDialogCancel>
-            <AlertDialogAction 
-              className="bg-red-500 hover:bg-red-600"
-              onClick={handleClearAll}
-            >
-              Limpar Todos
-            </AlertDialogAction>
+            <AlertDialogCancel className="border-border">Entendi</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
