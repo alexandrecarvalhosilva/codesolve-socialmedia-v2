@@ -15,7 +15,7 @@ router.get('/', authenticate, requireTenantMembership, async (req: Request, res:
     const skip = (Number(page) - 1) * Number(limit);
 
     const where: any = {
-      tenantId: user.tenantId,
+      tenantId: (user.tenantId as any),
       deletedAt: null,
     };
 
@@ -122,7 +122,7 @@ router.get('/:id', authenticate, requireTenantMembership, async (req: Request, r
     const contact = await prisma.contact.findFirst({
       where: {
         id,
-        tenantId: user.tenantId,
+        tenantId: (user.tenantId as any) || undefined,
         deletedAt: null,
       },
       include: {
@@ -163,7 +163,7 @@ router.get('/:id', authenticate, requireTenantMembership, async (req: Request, r
         isActive: contact.isActive,
         isBlocked: contact.isBlocked,
         lastContactAt: contact.lastContactAt?.toISOString() || null,
-        lists: contact.contactLists.map(cl => cl.list),
+        lists: contact.contactLists.map((cl: any) => cl.list),
         createdAt: contact.createdAt.toISOString(),
         updatedAt: contact.updatedAt.toISOString(),
       },
@@ -306,7 +306,7 @@ router.put('/:id', authenticate, requireTenantMembership, async (req: Request, r
     const { name, phone, email, avatar, company, position, notes, tags, customFields, isActive, isBlocked } = req.body;
 
     const contact = await prisma.contact.findFirst({
-      where: { id, tenantId: user.tenantId, deletedAt: null },
+      where: { id, tenantId: (user.tenantId as any), deletedAt: null },
     });
 
     if (!contact) {
@@ -392,7 +392,7 @@ router.delete('/:id', authenticate, requireTenantMembership, async (req: Request
     const { id } = req.params;
 
     const contact = await prisma.contact.findFirst({
-      where: { id, tenantId: user.tenantId, deletedAt: null },
+      where: { id, tenantId: (user.tenantId as any), deletedAt: null },
     });
 
     if (!contact) {
@@ -469,7 +469,7 @@ router.post('/:id/lists', authenticate, requireTenantMembership, async (req: Req
     }
 
     const contact = await prisma.contact.findFirst({
-      where: { id, tenantId: user.tenantId, deletedAt: null },
+      where: { id, tenantId: (user.tenantId as any), deletedAt: null },
     });
 
     if (!contact) {
@@ -534,7 +534,7 @@ router.delete('/:id/lists/:listId', authenticate, requireTenantMembership, async
     const { id, listId } = req.params;
 
     const contact = await prisma.contact.findFirst({
-      where: { id, tenantId: user.tenantId, deletedAt: null },
+      where: { id, tenantId: (user.tenantId as any), deletedAt: null },
     });
 
     if (!contact) {
@@ -710,7 +710,7 @@ router.get('/lists', authenticate, requireTenantMembership, async (req: Request,
     const skip = (Number(page) - 1) * Number(limit);
 
     const where: any = {
-      tenantId: user.tenantId,
+      tenantId: (user.tenantId as any),
       deletedAt: null,
     };
 
@@ -831,7 +831,7 @@ router.put('/lists/:id', authenticate, requireTenantMembership, async (req: Requ
     const { name, description, color, isDynamic, dynamicFilters } = req.body;
 
     const list = await prisma.contactList.findFirst({
-      where: { id, tenantId: user.tenantId, deletedAt: null },
+      where: { id, tenantId: (user.tenantId as any), deletedAt: null },
     });
 
     if (!list) {
@@ -896,7 +896,7 @@ router.delete('/lists/:id', authenticate, requireTenantMembership, async (req: R
     const { id } = req.params;
 
     const list = await prisma.contactList.findFirst({
-      where: { id, tenantId: user.tenantId, deletedAt: null },
+      where: { id, tenantId: (user.tenantId as any), deletedAt: null },
     });
 
     if (!list) {
@@ -947,7 +947,7 @@ router.get('/lists/:id/members', authenticate, requireTenantMembership, async (r
     const skip = (Number(page) - 1) * Number(limit);
 
     const list = await prisma.contactList.findFirst({
-      where: { id, tenantId: user.tenantId, deletedAt: null },
+      where: { id, tenantId: (user.tenantId as any), deletedAt: null },
     });
 
     if (!list) {

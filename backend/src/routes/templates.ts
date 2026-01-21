@@ -438,7 +438,7 @@ router.post('/preview', authenticate, async (req: Request, res: Response) => {
         originalContent: content,
         renderedContent,
         variables: extractedVariables,
-        missingVariables: extractedVariables.filter(v => !variables || !(v in variables)),
+        missingVariables: extractedVariables.filter((v: string) => !variables || !(v in variables)),
       },
     });
   } catch (error) {

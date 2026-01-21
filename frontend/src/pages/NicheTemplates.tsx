@@ -53,7 +53,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { StatusPill } from '@/components/dashboard/StatusPill';
-import { nicheTemplates as initialTemplates } from '@/data/nicheTemplatesMock';
+import { fetchNicheTemplates } from '@/services/templateService';
 import { NicheTemplate, NicheVariable, NicheFAQ } from '@/types/nicheTemplate';
 import { toast } from 'sonner';
 import { Label } from '@/components/ui/label';
@@ -69,7 +69,23 @@ const categories = [
 ];
 
 export default function NicheTemplates() {
-  const [templates, setTemplates] = useState<NicheTemplate[]>(initialTemplates);
+  const [templates, setTemplates] = useState<NicheTemplate[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load templates on mount
+  useEffect(() => {
+    const loadTemplates = async () => {
+      try {
+        const data = await fetchNicheTemplates();
+        setTemplates(data);
+      } catch (error) {
+        toast.error('Erro ao carregar templates');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadTemplates();
+  }, []);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [showModal, setShowModal] = useState(false);

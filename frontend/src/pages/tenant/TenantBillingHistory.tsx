@@ -1,24 +1,27 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { TenantLayout } from '@/layouts/TenantLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, History, Wallet } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { PlanChangeHistoryTable } from '@/components/billing/PlanChangeHistoryTable';
 import { CreditsCard } from '@/components/billing/CreditsCard';
-import { 
-  getPlanChangeHistoryByTenant, 
-  getCreditTransactionsByTenant, 
-  getTenantCreditBalance 
-} from '@/data/planChangeHistoryMock';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useBillingHistory, useCredits } from '@/hooks/useBilling';
 
 export default function TenantBillingHistory() {
-  // Simula o tenant atual (ID 1)
-  const tenantId = '1';
+  const { id } = useParams();
+  const tenantId = id || '1';
   
-  const planChangeHistory = getPlanChangeHistoryByTenant(tenantId);
-  const creditTransactions = getCreditTransactionsByTenant(tenantId);
-  const creditBalance = getTenantCreditBalance(tenantId);
+  const { history, isLoading: historyLoading, fetchHistory } = useBillingHistory(tenantId);
+  const { credits, isLoading: creditsLoading, fetchCredits } = useCredits(tenantId);
+
+  useEffect(() => {
+    fetchHistory();
+    fetchCredits();
+  }, [fetchHistory, fetchCredits]);
+
+  const isLoading = historyLoading || creditsLoading;
 
   return (
     <TenantLayout>
@@ -52,15 +55,23 @@ export default function TenantBillingHistory() {
           </TabsList>
 
           <TabsContent value="history" className="space-y-6">
-            <PlanChangeHistoryTable history={planChangeHistory} />
+            {isLoading ? (
+              <Skeleton className="h-64 w-full" />
+            ) : (
+              <PlanChangeHistoryTable history={history} />
+            )}
           </TabsContent>
 
           <TabsContent value="credits" className="space-y-6">
-            <CreditsCard
-              balance={creditBalance}
-              transactions={creditTransactions}
-              showFullHistory
-            />
+            {isLoading ? (
+              <Skeleton className="h-64 w-full" />
+            ) : (
+              <CreditsCard
+                balance={credits?.balance || 0}
+                transactions={credits?.transactions || []}
+                showFullHistory
+              />
+            )}
           </TabsContent>
         </Tabs>
       </div>

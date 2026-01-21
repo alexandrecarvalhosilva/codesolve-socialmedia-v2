@@ -324,7 +324,7 @@ router.get('/tenant', authenticate, async (req: Request, res: Response) => {
     // Buscar tenant com módulos
     const tenant = await prisma.tenant.findUnique({
       where: { id: user.tenantId },
-      select: { modules: true },
+      include: { tenantModules: true },
     });
     
     if (!tenant) {
@@ -337,7 +337,7 @@ router.get('/tenant', authenticate, async (req: Request, res: Response) => {
     // Módulos habilitados (core + módulos do tenant)
     const enabledModuleIds = [
       ...MODULE_CATALOG.filter(m => m.isCore).map(m => m.id),
-      ...(tenant.modules || []),
+      ...(tenant.tenantModules.map((tm: any) => tm.moduleId) || []),
     ];
     
     const modules = MODULE_CATALOG.map(m => ({
@@ -403,10 +403,10 @@ router.post('/tenant/:moduleId/toggle', authenticate, requirePermission('modules
     if (enabled && module.dependencies.length > 0) {
       const tenant = await prisma.tenant.findUnique({
         where: { id: tenantId },
-        select: { modules: true },
+        include: { tenantModules: true },
       });
       
-      const currentModules = tenant?.modules || [];
+      const currentModules = tenant?.tenantModules.map((tm: any) => tm.moduleId) || [];
       const missingDeps = module.dependencies.filter(dep => !currentModules.includes(dep));
       
       if (missingDeps.length > 0) {
@@ -423,10 +423,10 @@ router.post('/tenant/:moduleId/toggle', authenticate, requirePermission('modules
     // Atualizar módulos do tenant
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
-      select: { modules: true },
+      include: { tenantModules: true },
     });
     
-    let newModules = tenant?.modules || [];
+    let newModules = tenant?.tenantModules.map((tm: any) => tm.moduleId) || [];
     
     if (enabled) {
       if (!newModules.includes(moduleId)) {
@@ -442,10 +442,28 @@ router.post('/tenant/:moduleId/toggle', authenticate, requirePermission('modules
       });
     }
     
-    await prisma.tenant.update({
-      where: { id: tenantId },
-      data: { modules: newModules },
-    });
+    if (enabled) {
+      await prisma.tenantModule.upsert({
+        where: { tenantId_moduleId: { tenantId, moduleId } },
+        create: { tenantId, moduleId, status: 'active' },
+        update: { status: 'active' },
+      });
+    } else {
+      await prisma.tenantModule.deleteMany({
+        where: { tenantId, moduleId },
+      });
+      
+      // Remover módulos que dependem deste
+      const dependentModules = MODULE_CATALOG.filter(m => m.dependencies.includes(moduleId));
+      if (dependentModules.length > 0) {
+        await prisma.tenantModule.deleteMany({
+          where: { 
+            tenantId, 
+            moduleId: { in: dependentModules.map(m => m.id) } 
+          },
+        });
+      }
+    }
     
     res.json({
       success: true,
@@ -520,10 +538,21 @@ router.put('/tenant/bulk', authenticate, requirePermission('modules:manage'), as
       }
     }
     
-    await prisma.tenant.update({
-      where: { id: tenantId },
-      data: { modules },
+    // Remover módulos atuais
+    await prisma.tenantModule.deleteMany({
+      where: { tenantId },
     });
+    
+    // Adicionar novos módulos
+    if (modules.length > 0) {
+      await prisma.tenantModule.createMany({
+        data: modules.map((moduleId: string) => ({
+          tenantId,
+          moduleId,
+          status: 'active',
+        })),
+      });
+    }
     
     res.json({
       success: true,

@@ -386,7 +386,7 @@ router.get('/ai-consumption', authenticate, requirePermission('reports:view'), a
       orderBy: { createdAt: 'asc' },
     });
 
-    const totalTokens = usageRecords.reduce((sum, r) => sum + r.usageCount, 0);
+    const totalTokens = usageRecords.reduce((sum, r) => sum + Number(r.usageCount), 0);
     const limit = tenant.plan?.maxAiTokensPerMonth || 10000;
 
     // Group by day for chart

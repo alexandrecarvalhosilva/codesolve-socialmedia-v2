@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -35,11 +35,12 @@ import {
   OnboardingStep 
 } from '@/types/nicheTemplate';
 import { 
-  nicheTemplates, 
+  fetchNicheTemplates, 
   getTemplateById, 
-  applyVariablesToPrompt,
-  categoryToTemplateMap 
-} from '@/data/nicheTemplatesMock';
+  applyVariablesToPrompt 
+} from '@/services/templateService';
+import { useWhatsApp } from '@/hooks/useWhatsApp';
+import { api } from '@/lib/api';
 import {
   Dialog,
   DialogContent,
@@ -57,22 +58,21 @@ const steps: { id: OnboardingStep; title: string; icon: React.ElementType }[] = 
 export default function Onboarding() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { instances, createInstance, getQrCode, disconnectInstance, isLoading: waLoading } = useWhatsApp();
   
   const [currentStep, setCurrentStep] = useState<OnboardingStep>('whatsapp');
   const [isLoading, setIsLoading] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+  const [qrCode, setQrCode] = useState<string | null>(null);
   const [qrCodeLoading, setQrCodeLoading] = useState(false);
   const [previewPrompt, setPreviewPrompt] = useState(false);
-  
-  // Get user's niche from registration
-  const userNiche = user?.niche || 'outro';
-  const suggestedTemplates = categoryToTemplateMap[userNiche] || ['custom'];
+  const [nicheTemplates, setNicheTemplates] = useState<NicheTemplate[]>([]);
   
   const [onboardingData, setOnboardingData] = useState<TenantOnboardingData>({
-    openaiApiKey: '', // Not used anymore - centralized in SuperAdmin
+    openaiApiKey: '',
     openaiModel: 'gpt-4',
     whatsappInstances: [],
-    selectedNicheId: suggestedTemplates[0] || 'custom',
+    selectedNicheId: '',
     variableValues: {},
     faqs: [],
   });
@@ -80,8 +80,24 @@ export default function Onboarding() {
   const [newWhatsAppName, setNewWhatsAppName] = useState('');
   const [newFaq, setNewFaq] = useState({ question: '', answer: '', category: '' });
   
+  // Load templates
+  useEffect(() => {
+    const loadTemplates = async () => {
+      try {
+        const data = await fetchNicheTemplates();
+        setNicheTemplates(data);
+        if (data.length > 0 && !onboardingData.selectedNicheId) {
+          setOnboardingData(prev => ({ ...prev, selectedNicheId: data[0].id }));
+        }
+      } catch (error) {
+        console.error('Failed to load templates');
+      }
+    };
+    loadTemplates();
+  }, []);
+
   // Selected template
-  const selectedTemplate = getTemplateById(onboardingData.selectedNicheId);
+  const selectedTemplate = getTemplateById(nicheTemplates, onboardingData.selectedNicheId);
   
   // Initialize variable values when template changes
   useEffect(() => {
@@ -121,70 +137,51 @@ export default function Onboarding() {
   
   const handleComplete = async () => {
     setIsLoading(true);
-    
-    // Simulate saving onboarding data
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    // Save to localStorage to mark onboarding as complete
-    localStorage.setItem('onboarding_complete', 'true');
-    localStorage.setItem('tenant_config', JSON.stringify(onboardingData));
-    
-    toast.success('Configuração concluída! 🎉', {
-      description: 'Seu assistente virtual está pronto para uso.',
-    });
-    
-    navigate('/tenant/dashboard');
+    try {
+      // Save onboarding data to backend
+      await api.post('/tenants/onboarding', {
+        nicheId: onboardingData.selectedNicheId,
+        variables: onboardingData.variableValues,
+        faqs: onboardingData.faqs,
+      });
+      
+      toast.success('Configuração concluída! 🎉', {
+        description: 'Seu assistente virtual está pronto para uso.',
+      });
+      
+      navigate('/tenant/dashboard');
+    } catch (error) {
+      toast.error('Erro ao salvar configurações');
+    } finally {
+      setIsLoading(false);
+    }
   };
   
   const handleSkip = () => {
-    localStorage.setItem('onboarding_complete', 'skipped');
     toast.info('Você pode configurar tudo depois em Configurações.');
     navigate('/tenant/dashboard');
   };
   
-  const addWhatsAppInstance = () => {
+  const handleCreateInstance = async () => {
     if (!newWhatsAppName.trim()) {
       toast.error('Digite um nome para a instância');
       return;
     }
     
-    const newInstance = {
-      id: `wa_${Date.now()}`,
-      name: newWhatsAppName,
-      phone: '',
-      status: 'pending' as const,
-    };
-    
-    setOnboardingData(prev => ({
-      ...prev,
-      whatsappInstances: [...prev.whatsappInstances, newInstance],
-    }));
-    setNewWhatsAppName('');
-    setShowQrModal(true);
-  };
-  
-  const simulateQrScan = (instanceId: string) => {
-    setQrCodeLoading(true);
-    setTimeout(() => {
-      setOnboardingData(prev => ({
-        ...prev,
-        whatsappInstances: prev.whatsappInstances.map(inst =>
-          inst.id === instanceId
-            ? { ...inst, status: 'connected' as const, phone: '+55 11 99999-9999' }
-            : inst
-        ),
-      }));
+    try {
+      setQrCodeLoading(true);
+      const instance = await createInstance(newWhatsAppName);
+      setNewWhatsAppName('');
+      
+      // Get QR Code
+      const qr = await getQrCode(instance.id);
+      setQrCode(qr);
+      setShowQrModal(true);
+    } catch (error) {
+      toast.error('Erro ao criar instância');
+    } finally {
       setQrCodeLoading(false);
-      setShowQrModal(false);
-      toast.success('WhatsApp conectado com sucesso!');
-    }, 3000);
-  };
-  
-  const removeWhatsAppInstance = (id: string) => {
-    setOnboardingData(prev => ({
-      ...prev,
-      whatsappInstances: prev.whatsappInstances.filter(inst => inst.id !== id),
-    }));
+    }
   };
   
   const updateVariableValue = (key: string, value: string) => {
@@ -305,378 +302,251 @@ export default function Onboarding() {
           <Card className="bg-cs-bg-card border-border">
             <CardHeader>
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/20 flex items-center justify-center">
-                  <MessageSquare className="h-6 w-6 text-green-500" />
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <MessageSquare className="w-6 h-6 text-primary" />
                 </div>
                 <div>
-                  <CardTitle>Conectar WhatsApp</CardTitle>
+                  <CardTitle>Conecte seu WhatsApp</CardTitle>
                   <CardDescription>
-                    Vincule suas instâncias do WhatsApp via Evolution API
+                    O assistente precisa de uma conexão ativa para responder seus clientes.
                   </CardDescription>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Add new instance */}
-              <div className="flex gap-3">
-                <Input
-                  placeholder="Nome da instância (ex: Atendimento Principal)"
+              <div className="flex gap-2">
+                <Input 
+                  placeholder="Nome da conexão (ex: Atendimento)" 
                   value={newWhatsAppName}
                   onChange={(e) => setNewWhatsAppName(e.target.value)}
+                  className="bg-muted border-border"
                 />
-                <Button onClick={addWhatsAppInstance} className="shrink-0">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Adicionar
+                <Button onClick={handleCreateInstance} disabled={qrCodeLoading}>
+                  {qrCodeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                  Criar Conexão
                 </Button>
               </div>
-              
-              {/* Instances list */}
-              {onboardingData.whatsappInstances.length > 0 ? (
-                <div className="space-y-3">
-                  {onboardingData.whatsappInstances.map(instance => (
-                    <div 
-                      key={instance.id}
-                      className="flex items-center justify-between p-4 rounded-lg border border-border bg-card/50"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Smartphone className="h-5 w-5 text-muted-foreground" />
-                        <div>
-                          <p className="font-medium">{instance.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {instance.phone || 'Aguardando conexão'}
-                          </p>
-                        </div>
+
+              <div className="space-y-3">
+                {instances.map(inst => (
+                  <div key={inst.id} className="flex items-center justify-between p-4 rounded-lg border border-border bg-muted/30">
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-full ${inst.status === 'connected' ? 'bg-cs-success/10' : 'bg-cs-warning/10'}`}>
+                        <Smartphone className={`w-5 h-5 ${inst.status === 'connected' ? 'text-cs-success' : 'text-cs-warning'}`} />
                       </div>
-                      <div className="flex items-center gap-2">
-                        {instance.status === 'connected' ? (
-                          <Badge className="bg-cs-success/20 text-cs-success border-cs-success/30">
-                            <CheckCircle2 className="h-3 w-3 mr-1" />
-                            Conectado
-                          </Badge>
-                        ) : instance.status === 'disconnected' ? (
-                          <Badge variant="destructive">
-                            <XCircle className="h-3 w-3 mr-1" />
-                            Desconectado
-                          </Badge>
-                        ) : (
-                          <Button 
-                            size="sm" 
-                            variant="outline"
-                            onClick={() => {
-                              setShowQrModal(true);
-                            }}
-                          >
-                            <QrCode className="h-4 w-4 mr-2" />
-                            Escanear QR
-                          </Button>
-                        )}
-                        <Button 
-                          size="icon" 
-                          variant="ghost" 
-                          className="text-muted-foreground hover:text-cs-error"
-                          onClick={() => removeWhatsAppInstance(instance.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                      <div>
+                        <p className="font-medium text-sm">{inst.name}</p>
+                        <p className="text-xs text-muted-foreground">{inst.phone || 'Aguardando conexão'}</p>
                       </div>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                  <p>Nenhuma instância configurada</p>
-                  <p className="text-sm">Adicione uma instância para conectar seu WhatsApp</p>
-                </div>
-              )}
-              
-              <div className="bg-muted/30 rounded-lg p-4 text-sm text-muted-foreground">
-                <p className="font-medium text-foreground mb-1">💡 Dica</p>
-                <p>Você pode adicionar várias instâncias para diferentes departamentos ou números.</p>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={inst.status === 'connected' ? 'default' : 'secondary'} className={inst.status === 'connected' ? 'bg-cs-success hover:bg-cs-success' : ''}>
+                        {inst.status === 'connected' ? 'Conectado' : 'Pendente'}
+                      </Badge>
+                      {inst.status !== 'connected' && (
+                        <Button size="sm" variant="outline" onClick={async () => {
+                          const qr = await getQrCode(inst.id);
+                          setQrCode(qr);
+                          setShowQrModal(true);
+                        }}>
+                          <QrCode className="w-4 h-4 mr-2" />
+                          QR Code
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>
         )}
-        
-        {/* Step 3: Niche & Prompt */}
+
+        {/* Step 2: Niche */}
         {currentStep === 'niche' && (
           <Card className="bg-cs-bg-card border-border">
             <CardHeader>
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
-                  <Sparkles className="h-6 w-6 text-primary" />
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <Sparkles className="w-6 h-6 text-primary" />
                 </div>
                 <div>
-                  <CardTitle>Personalizar Assistente</CardTitle>
+                  <CardTitle>Escolha seu Nicho</CardTitle>
                   <CardDescription>
-                    Escolha um template de nicho e customize as variáveis
+                    Selecione o modelo que melhor se adapta ao seu negócio.
                   </CardDescription>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
-              {/* Template Selection */}
-              <div className="space-y-3">
-                <Label>Template de Nicho</Label>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {nicheTemplates.filter(t => t.isActive).map(template => (
-                    <button
-                      key={template.id}
-                      type="button"
-                      onClick={() => setOnboardingData(prev => ({ ...prev, selectedNicheId: template.id }))}
-                      className={`p-4 rounded-lg border text-left transition-all ${
-                        onboardingData.selectedNicheId === template.id
-                          ? 'border-primary bg-primary/10 ring-1 ring-primary'
-                          : 'border-border hover:border-muted-foreground'
-                      }`}
-                    >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {nicheTemplates.map(template => (
+                  <div 
+                    key={template.id}
+                    onClick={() => setOnboardingData(prev => ({ ...prev, selectedNicheId: template.id }))}
+                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      onboardingData.selectedNicheId === template.id 
+                        ? 'border-primary bg-primary/5' 
+                        : 'border-border bg-muted/30 hover:border-primary/50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 mb-2">
                       <span className="text-2xl">{template.icon}</span>
-                      <p className="font-medium text-sm mt-2">{template.name}</p>
-                      <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                        {template.description}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-              
-              {/* Variables */}
-              {selectedTemplate && (
-                <div className="space-y-4 border-t border-border pt-6">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-base">Personalize seu Assistente</Label>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPreviewPrompt(!previewPrompt)}
-                    >
-                      <Eye className="h-4 w-4 mr-2" />
-                      {previewPrompt ? 'Ocultar Prompt' : 'Ver Prompt'}
-                    </Button>
+                      <h4 className="font-bold">{template.name}</h4>
+                    </div>
+                    <p className="text-xs text-muted-foreground line-clamp-2">{template.description}</p>
                   </div>
-                  
-                  <div className="grid gap-4">
+                ))}
+              </div>
+
+              {selectedTemplate && (
+                <div className="space-y-4 pt-4 border-t border-border">
+                  <h4 className="font-semibold text-sm flex items-center gap-2">
+                    <Settings className="w-4 h-4 text-primary" />
+                    Personalize as variáveis
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {selectedTemplate.variables.map(variable => (
-                      <div key={variable.key} className="space-y-2">
-                        <Label htmlFor={variable.key}>
+                      <div key={variable.key} className="space-y-1.5">
+                        <Label className="text-xs">
                           {variable.label}
-                          {variable.required && <span className="text-cs-error ml-1">*</span>}
+                          {variable.required && <span className="text-red-500 ml-1">*</span>}
                         </Label>
-                        {variable.type === 'textarea' ? (
-                          <Textarea
-                            id={variable.key}
-                            placeholder={variable.placeholder}
-                            value={onboardingData.variableValues[variable.key] || ''}
-                            onChange={(e) => updateVariableValue(variable.key, e.target.value)}
-                            rows={4}
-                          />
-                        ) : (
-                          <Input
-                            id={variable.key}
-                            placeholder={variable.placeholder}
-                            value={onboardingData.variableValues[variable.key] || ''}
-                            onChange={(e) => updateVariableValue(variable.key, e.target.value)}
-                          />
-                        )}
-                        <p className="text-xs text-muted-foreground">{variable.description}</p>
+                        <Input 
+                          placeholder={variable.placeholder}
+                          value={onboardingData.variableValues[variable.key] || ''}
+                          onChange={(e) => updateVariableValue(variable.key, e.target.value)}
+                          className="bg-muted border-border h-9 text-sm"
+                        />
                       </div>
                     ))}
                   </div>
-                  
-                  {/* Prompt Preview */}
-                  {previewPrompt && (
-                    <div className="mt-4 p-4 rounded-lg bg-muted/50 border border-border">
-                      <div className="flex items-center justify-between mb-2">
-                        <Label className="text-sm">Preview do Prompt</Label>
-                        <Badge variant="secondary">Preview</Badge>
-                      </div>
-                      <pre className="text-xs font-mono whitespace-pre-wrap text-muted-foreground max-h-64 overflow-y-auto">
-                        {getGeneratedPrompt()}
-                      </pre>
-                    </div>
-                  )}
                 </div>
               )}
             </CardContent>
           </Card>
         )}
-        
-        {/* Step 4: FAQs */}
+
+        {/* Step 3: FAQ */}
         {currentStep === 'faq' && (
           <Card className="bg-cs-bg-card border-border">
             <CardHeader>
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center">
-                  <HelpCircle className="h-6 w-6 text-amber-500" />
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <HelpCircle className="w-6 h-6 text-primary" />
                 </div>
                 <div>
-                  <CardTitle>Base de Conhecimento (FAQ)</CardTitle>
+                  <CardTitle>Perguntas Frequentes (FAQs)</CardTitle>
                   <CardDescription>
-                    Configure perguntas frequentes para respostas mais precisas
+                    Adicione informações específicas para treinar sua IA.
                   </CardDescription>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
-              <Tabs defaultValue="list" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="list">FAQs Atuais ({onboardingData.faqs.length})</TabsTrigger>
-                  <TabsTrigger value="add">Adicionar Novo</TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="list" className="mt-4 space-y-3">
-                  {onboardingData.faqs.length > 0 ? (
-                    onboardingData.faqs.map(faq => (
-                      <div 
-                        key={faq.id}
-                        className="p-4 rounded-lg border border-border bg-card/50"
+              <div className="bg-muted/30 p-4 rounded-lg border border-border space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-xs">Pergunta</Label>
+                  <Input 
+                    placeholder="Ex: Qual o valor da mensalidade?" 
+                    value={newFaq.question}
+                    onChange={(e) => setNewFaq(prev => ({ ...prev, question: e.target.value }))}
+                    className="bg-card border-border"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Resposta</Label>
+                  <Textarea 
+                    placeholder="Ex: Nossa mensalidade custa R$ 150,00 no plano mensal." 
+                    value={newFaq.answer}
+                    onChange={(e) => setNewFaq(prev => ({ ...prev, answer: e.target.value }))}
+                    className="bg-card border-border min-h-[80px]"
+                  />
+                </div>
+                <Button size="sm" className="w-full" onClick={addFaq}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Adicionar FAQ
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold">FAQs Adicionados ({onboardingData.faqs.length})</h4>
+                <div className="max-h-[300px] overflow-y-auto space-y-2 pr-2">
+                  {onboardingData.faqs.map(faq => (
+                    <div key={faq.id} className="p-3 rounded-lg border border-border bg-muted/20 group relative">
+                      <p className="text-sm font-medium pr-8">{faq.question}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{faq.answer}</p>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-500 hover:bg-red-500/10"
+                        onClick={() => removeFaq(faq.id)}
                       >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <p className="font-medium text-sm">{faq.question}</p>
-                              {faq.isDefault && (
-                                <Badge variant="secondary" className="text-xs">Template</Badge>
-                              )}
-                            </div>
-                            <p className="text-sm text-muted-foreground">{faq.answer}</p>
-                            <Badge variant="outline" className="mt-2 text-xs">{faq.category}</Badge>
-                          </div>
-                          <Button 
-                            size="icon" 
-                            variant="ghost" 
-                            className="text-muted-foreground hover:text-cs-error shrink-0"
-                            onClick={() => removeFaq(faq.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <HelpCircle className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                      <p>Nenhuma FAQ configurada</p>
-                      <p className="text-sm">Adicione perguntas frequentes para melhorar as respostas</p>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
-                  )}
-                </TabsContent>
-                
-                <TabsContent value="add" className="mt-4 space-y-4">
-                  <div className="space-y-2">
-                    <Label>Pergunta</Label>
-                    <Input
-                      placeholder="Ex: Qual o horário de funcionamento?"
-                      value={newFaq.question}
-                      onChange={(e) => setNewFaq(prev => ({ ...prev, question: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Resposta</Label>
-                    <Textarea
-                      placeholder="Ex: Funcionamos de segunda a sexta, das 8h às 18h."
-                      value={newFaq.answer}
-                      onChange={(e) => setNewFaq(prev => ({ ...prev, answer: e.target.value }))}
-                      rows={3}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Categoria</Label>
-                    <Input
-                      placeholder="Ex: horarios, precos, servicos"
-                      value={newFaq.category}
-                      onChange={(e) => setNewFaq(prev => ({ ...prev, category: e.target.value }))}
-                    />
-                  </div>
-                  <Button onClick={addFaq} className="w-full">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Adicionar FAQ
-                  </Button>
-                </TabsContent>
-              </Tabs>
+                  ))}
+                </div>
+              </div>
             </CardContent>
           </Card>
         )}
-        
-        {/* Navigation */}
-        <div className="flex items-center justify-between mt-8">
-          <Button
-            variant="outline"
+
+        {/* Footer Actions */}
+        <div className="mt-8 flex items-center justify-between">
+          <Button 
+            variant="outline" 
             onClick={handleBack}
-            disabled={currentStepIndex === 0}
+            disabled={currentStepIndex === 0 || isLoading}
           >
-            <ArrowLeft className="h-4 w-4 mr-2" />
+            <ArrowLeft className="w-4 h-4 mr-2" />
             Voltar
           </Button>
           
-          {currentStepIndex < steps.length - 1 ? (
-            <Button
-              onClick={handleNext}
-              disabled={!canProceed()}
-              className="btn-gradient"
+          {currentStepIndex === steps.length - 1 ? (
+            <Button 
+              className="bg-gradient-to-r from-primary to-accent px-8"
+              onClick={handleComplete}
+              disabled={!canProceed() || isLoading}
             >
-              Continuar
-              <ArrowRight className="h-4 w-4 ml-2" />
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+              Finalizar Configuração
             </Button>
           ) : (
-            <Button
-              onClick={handleComplete}
-              disabled={isLoading}
-              className="btn-gradient"
+            <Button 
+              className="bg-primary px-8"
+              onClick={handleNext}
+              disabled={!canProceed() || isLoading}
             >
-              {isLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Finalizando...
-                </>
-              ) : (
-                <>
-                  <Check className="h-4 w-4 mr-2" />
-                  Concluir Configuração
-                </>
-              )}
+              Próximo Passo
+              <ArrowRight className="w-4 h-4 ml-2" />
             </Button>
           )}
         </div>
       </div>
-      
+
       {/* QR Code Modal */}
       <Dialog open={showQrModal} onOpenChange={setShowQrModal}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="bg-card border-border sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Escanear QR Code</DialogTitle>
+            <DialogTitle>Conectar WhatsApp</DialogTitle>
             <DialogDescription>
-              Abra o WhatsApp no seu celular e escaneie o QR Code abaixo
+              Abra o WhatsApp no seu celular, vá em Aparelhos Conectados e escaneie o código abaixo.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col items-center py-6">
-            {qrCodeLoading ? (
-              <div className="w-48 h-48 flex items-center justify-center bg-muted rounded-lg">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <div className="flex flex-col items-center justify-center py-6">
+            {qrCode ? (
+              <div className="bg-white p-4 rounded-xl">
+                <img src={qrCode} alt="QR Code" className="w-64 h-64" />
               </div>
             ) : (
-              <>
-                {/* Simulated QR Code */}
-                <div className="w-48 h-48 bg-white p-4 rounded-lg">
-                  <div className="w-full h-full bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNTYgMjU2Ij48cmVjdCB3aWR0aD0iMjU2IiBoZWlnaHQ9IjI1NiIgZmlsbD0iI2ZmZiIvPjxwYXRoIGQ9Ik0zMiAzMmg2NHY2NEgzMnptOCA4djQ4aDQ4VjQwem04IDhoMzJ2MzJINDh6bTgwLThoNjR2NjRoLTY0em04IDh2NDhoNDhWNDB6bTggOGgzMnYzMmgtMzJ6TTMyIDE2MGg2NHY2NEgzMnptOCA4djQ4aDQ4di00OHptOCA4aDMydjMySDQ4eiIvPjxwYXRoIGQ9Ik0xMjggMzJoOHYxNmgtOHptMTYgMGg4djhoLTh6bTE2IDBoOHY4aC04em0xNiAwaDh2OGgtOHptMTYgMGg4djhoLTh6bTE2IDBoOHY4aC04em0xNiAwaDh2MzJoLTh6bS05NiAxNmg4djhoLTh6bTE2IDBoOHYxNmgtOHptMTYgMGg4djhoLTh6bTMyIDBoOHY4aC04em0tNjQgOGg4djhoLTh6bTE2IDBoOHY4aC04em0xNiAwaDh2OGgtOHptMTYgMGg4djhoLTh6bS04MCAxNmg4djhoLTh6bTE2IDBoOHY4aC04em0xNiAwaDh2OGgtOHptMTYgMGg4djhoLTh6bTE2IDBoOHY4aC04em0xNiAwaDh2OGgtOHptMTYgMGg4djhoLTh6bS0xMTIgOGg4djhoLTh6bTMyIDBoOHY4aC04em0zMiAwaDh2OGgtOHptMzIgMGg4djhoLTh6bS0xMTIgOGg4djhoLTh6bTE2IDBoOHY4aC04em0xNiAwaDh2OGgtOHptMTYgMGg4djhoLTh6bTE2IDBoOHY4aC04em0xNiAwaDh2OGgtOHptMTYgMGg4djhoLTh6bS0xMTIgOGg4djhoLTh6bTY0IDBoOHY4aC04em0tNDggOGg4djhoLTh6bTE2IDBoOHY4aC04em0xNiAwaDh2OGgtOHptMTYgMGg4djhoLTh6bTE2IDBoOHY4aC04em0xNiAwaDh2OGgtOHoiLz48L3N2Zz4=')] bg-contain" />
-                </div>
-                <p className="text-sm text-muted-foreground mt-4">
-                  WhatsApp &gt; Menu &gt; Aparelhos conectados &gt; Conectar aparelho
-                </p>
-                <Button 
-                  className="mt-4" 
-                  onClick={() => {
-                    const lastInstance = onboardingData.whatsappInstances[onboardingData.whatsappInstances.length - 1];
-                    if (lastInstance) {
-                      simulateQrScan(lastInstance.id);
-                    }
-                  }}
-                >
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Simular Conexão
-                </Button>
-              </>
+              <div className="w-64 h-64 bg-muted rounded-xl flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+              </div>
             )}
+            <p className="text-sm text-muted-foreground mt-6 flex items-center gap-2">
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              Aguardando leitura do código...
+            </p>
           </div>
         </DialogContent>
       </Dialog>
