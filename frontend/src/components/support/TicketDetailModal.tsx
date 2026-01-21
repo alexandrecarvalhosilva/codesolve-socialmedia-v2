@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   MessageSquare, 
   Clock, 
@@ -26,7 +26,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Ticket, priorityConfig, statusConfig, TicketStatus } from '@/types/support';
-import { slaLevels, supportAgents } from '@/data/supportMockData';
+import { useSLAs, useTicketActions } from '@/hooks/useSupport';
+import { useUsers } from '@/hooks/useUsers';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
@@ -42,12 +43,23 @@ export function TicketDetailModal({ ticket, open, onOpenChange, mode }: TicketDe
   const [newMessage, setNewMessage] = useState('');
   const [newStatus, setNewStatus] = useState<TicketStatus | ''>('');
   const [assignedAgent, setAssignedAgent] = useState('');
+  
+  const { slas } = useSLAs();
+  const { users: supportAgents } = useUsers({ role: 'support' });
+  const { assignTicket, updateStatus, isProcessing } = useTicketActions({
+    onSuccess: () => {
+      toast({ title: "Ação realizada", description: "Ticket atualizado com sucesso." });
+    },
+    onError: (error) => {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    }
+  });
 
   if (!ticket) return null;
 
   const priority = priorityConfig[ticket.priority];
   const status = statusConfig[ticket.status];
-  const sla = slaLevels.find(s => s.id === ticket.slaLevel);
+  const sla = slas.find(s => s.id === ticket.slaLevel);
 
   const formatDate = (date: Date) => {
     return new Intl.DateTimeFormat('pt-BR', {
@@ -69,24 +81,17 @@ export function TicketDetailModal({ ticket, open, onOpenChange, mode }: TicketDe
     setNewMessage('');
   };
 
-  const handleStatusChange = () => {
+  const handleStatusChange = async () => {
     if (!newStatus) return;
     
-    toast({ 
-      title: "Status atualizado", 
-      description: `O ticket foi alterado para "${statusConfig[newStatus].label}".` 
-    });
+    await updateStatus(ticket.id, newStatus);
     setNewStatus('');
   };
 
-  const handleAssign = () => {
+  const handleAssign = async () => {
     if (!assignedAgent) return;
     
-    const agent = supportAgents.find(a => a.id === assignedAgent);
-    toast({ 
-      title: "Ticket atribuído", 
-      description: `O ticket foi atribuído para ${agent?.name}.` 
-    });
+    await assignTicket(ticket.id, assignedAgent);
     setAssignedAgent('');
   };
 
@@ -113,9 +118,11 @@ export function TicketDetailModal({ ticket, open, onOpenChange, mode }: TicketDe
                 <Badge className={cn("text-xs", status.bgColor, status.color)}>
                   {status.label}
                 </Badge>
-                <Badge className={cn("text-xs border", sla?.color)}>
-                  SLA: {sla?.name}
-                </Badge>
+                {sla && (
+                  <Badge className={cn("text-xs border", sla.priority === 'urgent' ? 'text-red-400' : 'text-blue-400')}>
+                    SLA: {sla.name}
+                  </Badge>
+                )}
                 {ticket.slaBreached && (
                   <Badge className="text-xs bg-red-500/20 text-red-400">
                     <AlertTriangle className="w-3 h-3 mr-1" />
@@ -264,7 +271,7 @@ export function TicketDetailModal({ ticket, open, onOpenChange, mode }: TicketDe
                     </SelectContent>
                   </Select>
                   {newStatus && (
-                    <Button size="sm" className="w-full" onClick={handleStatusChange}>
+                    <Button size="sm" className="w-full" onClick={handleStatusChange} disabled={isProcessing}>
                       Atualizar Status
                     </Button>
                   )}
@@ -279,13 +286,13 @@ export function TicketDetailModal({ ticket, open, onOpenChange, mode }: TicketDe
                     <SelectContent>
                       {supportAgents.map(agent => (
                         <SelectItem key={agent.id} value={agent.id}>
-                          {agent.name} ({agent.activeTickets} ativos)
+                          {agent.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                   {assignedAgent && (
-                    <Button size="sm" className="w-full" onClick={handleAssign}>
+                    <Button size="sm" className="w-full" onClick={handleAssign} disabled={isProcessing}>
                       Atribuir Ticket
                     </Button>
                   )}

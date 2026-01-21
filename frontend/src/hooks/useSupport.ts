@@ -598,3 +598,107 @@ export function useTicketActions(options: UseTicketActionsOptions = {}): UseTick
     isProcessing,
   };
 }
+
+
+// ============================================================================
+// URGENT TICKETS HOOK (for SLA alerts)
+// ============================================================================
+
+interface UrgentTicket {
+  id: string;
+  title: string;
+  tenantName: string;
+  slaLevel: string;
+  timeRemaining: number; // in minutes
+  priority: 'high' | 'critical';
+  type: 'response' | 'resolution';
+  isNew?: boolean;
+}
+
+interface UseUrgentTicketsReturn {
+  urgentTickets: UrgentTicket[];
+  isLoading: boolean;
+  error: Error | null;
+  fetchUrgentTickets: () => Promise<void>;
+}
+
+export function useUrgentTickets(): UseUrgentTicketsReturn {
+  const [urgentTickets, setUrgentTickets] = useState<UrgentTicket[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchUrgentTickets = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const response = await api.get('/support/tickets/urgent');
+      if (response.data.success) {
+        setUrgentTickets(response.data.data || []);
+      }
+    } catch (err) {
+      // Fallback to empty array if endpoint not available
+      setUrgentTickets([]);
+      setError(err instanceof Error ? err : new Error('Erro ao carregar tickets urgentes'));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  return { urgentTickets, isLoading, error, fetchUrgentTickets };
+}
+
+// ============================================================================
+// TICKET STATISTICS HOOK
+// ============================================================================
+
+interface TicketStats {
+  total: number;
+  open: number;
+  inProgress: number;
+  resolved: number;
+  closed: number;
+  avgResponseTime: number;
+  avgResolutionTime: number;
+  slaComplianceRate: number;
+}
+
+interface UseTicketStatsReturn {
+  stats: TicketStats | null;
+  isLoading: boolean;
+  error: Error | null;
+  fetchStats: () => Promise<void>;
+}
+
+export function useTicketStats(): UseTicketStatsReturn {
+  const [stats, setStats] = useState<TicketStats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const response = await api.get('/support/tickets/stats');
+      if (response.data.success) {
+        setStats(response.data.data);
+      }
+    } catch (err) {
+      // Fallback to default stats
+      setStats({
+        total: 0,
+        open: 0,
+        inProgress: 0,
+        resolved: 0,
+        closed: 0,
+        avgResponseTime: 0,
+        avgResolutionTime: 0,
+        slaComplianceRate: 0,
+      });
+      setError(err instanceof Error ? err : new Error('Erro ao carregar estatísticas'));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  return { stats, isLoading, error, fetchStats };
+}

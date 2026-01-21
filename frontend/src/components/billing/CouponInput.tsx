@@ -2,78 +2,42 @@ import { useState } from 'react';
 import { Tag, Check, X, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { mockCoupons } from '@/data/billingMockData';
+import { useValidateCoupon } from '@/hooks/useBilling';
 import { formatPrice } from '@/types/billing';
 
 interface CouponInputProps {
-  onApply: (couponCode: string, discountAmount: number) => void;
+  onApply: (couponCode: string, discountAmount?: number) => void;
   onRemove: () => void;
   appliedCoupon: string | null;
-  subtotal: number;
+  subtotal?: number;
+  isValidating?: boolean;
 }
 
-export function CouponInput({ onApply, onRemove, appliedCoupon, subtotal }: CouponInputProps) {
+export function CouponInput({ onApply, onRemove, appliedCoupon, subtotal = 0, isValidating: externalValidating }: CouponInputProps) {
   const [code, setCode] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  const { validateCoupon, isValidating: internalValidating } = useValidateCoupon();
+  const isValidating = externalValidating || internalValidating;
 
   const handleApply = async () => {
     if (!code.trim()) return;
     
-    setIsLoading(true);
     setError(null);
     
-    // Simular delay de API
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    const coupon = mockCoupons.find(
-      c => c.code.toUpperCase() === code.toUpperCase() && c.isActive
-    );
-    
-    if (!coupon) {
-      setError('Cupom inválido ou expirado');
-      setIsLoading(false);
-      return;
+    try {
+      const result = await validateCoupon(code, subtotal);
+      
+      if (!result.valid) {
+        setError(result.message || 'Cupom inválido ou expirado');
+        return;
+      }
+      
+      onApply(code, result.discountValue);
+      setCode('');
+    } catch (err: any) {
+      setError(err.message || 'Erro ao validar cupom');
     }
-    
-    // Verificar validade
-    const now = new Date();
-    if (coupon.validFrom && new Date(coupon.validFrom) > now) {
-      setError('Cupom ainda não está válido');
-      setIsLoading(false);
-      return;
-    }
-    if (coupon.validUntil && new Date(coupon.validUntil) < now) {
-      setError('Cupom expirado');
-      setIsLoading(false);
-      return;
-    }
-    
-    // Verificar limite de uso
-    if (coupon.maxUses && coupon.usedCount >= coupon.maxUses) {
-      setError('Cupom atingiu limite de uso');
-      setIsLoading(false);
-      return;
-    }
-    
-    // Verificar valor mínimo
-    if (coupon.minPurchase && subtotal < coupon.minPurchase) {
-      setError(`Valor mínimo: ${formatPrice(coupon.minPurchase)}`);
-      setIsLoading(false);
-      return;
-    }
-    
-    // Calcular desconto
-    let discountAmount = 0;
-    if (coupon.discountType === 'percent') {
-      discountAmount = Math.round(subtotal * (coupon.discountValue / 100));
-    } else {
-      discountAmount = coupon.discountValue;
-    }
-    
-    onApply(coupon.code, discountAmount);
-    setCode('');
-    setIsLoading(false);
   };
 
   if (appliedCoupon) {
@@ -118,11 +82,11 @@ export function CouponInput({ onApply, onRemove, appliedCoupon, subtotal }: Coup
         </div>
         <Button
           onClick={handleApply}
-          disabled={!code.trim() || isLoading}
+          disabled={!code.trim() || isValidating}
           variant="outline"
           className="border-cs-cyan text-cs-cyan hover:bg-cs-cyan/10"
         >
-          {isLoading ? (
+          {isValidating ? (
             <Loader2 className="w-4 h-4 animate-spin" />
           ) : (
             'Aplicar'

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Headphones, 
@@ -11,10 +12,43 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { slaMetrics } from '@/data/supportMockData';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useTicketStats } from '@/hooks/useSupport';
 import { cn } from '@/lib/utils';
 
 export function SupportSummaryCard() {
+  const { stats, isLoading, fetchStats } = useTicketStats();
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  if (isLoading) {
+    return (
+      <Card className="bg-card border-border">
+        <CardHeader className="pb-3">
+          <Skeleton className="h-6 w-40" />
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const slaMetrics = {
+    openTickets: stats?.open || 0,
+    breachedTickets: Math.round((stats?.total || 0) * (1 - (stats?.slaComplianceRate || 100) / 100)),
+    slaComplianceRate: stats?.slaComplianceRate || 100,
+    resolvedToday: stats?.resolved || 0,
+    avgResponseTime: stats?.avgResponseTime ? (stats.avgResponseTime / 60).toFixed(1) : '0',
+  };
+
   return (
     <Card className="bg-card border-border">
       <CardHeader className="pb-3">

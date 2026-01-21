@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TenantLayout } from '@/layouts/TenantLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Skeleton } from '@/components/ui/skeleton';
 import { 
   ArrowLeft, 
   CreditCard, 
@@ -16,7 +17,7 @@ import {
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { CouponInput } from '@/components/billing/CouponInput';
-import { mockInvoices } from '@/data/billingMockData';
+import { useInvoices, useValidateCoupon, usePayInvoice } from '@/hooks/useBilling';
 import { formatPrice, PaymentMethodType } from '@/types/billing';
 import { toast } from 'sonner';
 
@@ -27,13 +28,42 @@ export default function TenantPayment() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType>('credit_card');
   const [appliedCoupon, setAppliedCoupon] = useState<string | null>(null);
   const [appliedDiscount, setAppliedDiscount] = useState(0);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
 
-  // Mock invoice
+  const { invoices, isLoading, fetchInvoices } = useInvoices();
+  const { validateCoupon, isValidating } = useValidateCoupon();
+  const { payInvoice, isPaying } = usePayInvoice();
+
+  useEffect(() => {
+    fetchInvoices({ status: 'pending' });
+  }, []);
+
+  // Encontrar a fatura
   const invoice = invoiceId 
-    ? mockInvoices.find(inv => inv.id === invoiceId)
-    : mockInvoices.find(inv => inv.status === 'pending');
+    ? invoices.find(inv => inv.id === invoiceId)
+    : invoices.find(inv => inv.status === 'pending');
+
+  if (isLoading) {
+    return (
+      <TenantLayout>
+        <div className="p-6 space-y-6">
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-10 w-10" />
+            <div>
+              <Skeleton className="h-8 w-48 mb-2" />
+              <Skeleton className="h-4 w-64" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2">
+              <Skeleton className="h-96 w-full" />
+            </div>
+            <Skeleton className="h-64 w-full" />
+          </div>
+        </div>
+      </TenantLayout>
+    );
+  }
 
   if (!invoice) {
     return (
@@ -52,13 +82,23 @@ export default function TenantPayment() {
     );
   }
 
-  const subtotal = invoice.total;
+  const subtotal = invoice.total || 0;
   const discount = appliedDiscount;
   const total = subtotal - discount;
 
-  const handleApplyCoupon = (couponCode: string, discountValue: number) => {
-    setAppliedCoupon(couponCode);
-    setAppliedDiscount(discountValue);
+  const handleApplyCoupon = async (couponCode: string) => {
+    try {
+      const result = await validateCoupon(couponCode, subtotal);
+      if (result.valid) {
+        setAppliedCoupon(couponCode);
+        setAppliedDiscount(result.discountValue || 0);
+        toast.success('Cupom aplicado com sucesso!');
+      } else {
+        toast.error(result.message || 'Cupom inválido');
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao validar cupom');
+    }
   };
 
   const handleRemoveCoupon = () => {
@@ -67,40 +107,39 @@ export default function TenantPayment() {
   };
 
   const handlePayment = async () => {
-    setIsProcessing(true);
-    
-    // Simula processamento
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setIsProcessing(false);
-    setIsPaid(true);
-    toast.success('Pagamento realizado com sucesso!');
+    try {
+      await payInvoice(invoice.id, paymentMethod, appliedCoupon || undefined);
+      setIsPaid(true);
+      toast.success('Pagamento realizado com sucesso!');
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao processar pagamento');
+    }
   };
 
   const copyPixCode = () => {
-    navigator.clipboard.writeText('00020126580014br.gov.bcb.pix...');
+    navigator.clipboard.writeText('00020126580014br.gov.bcb.pix0136a1b2c3d4-e5f6-7890-abcd-ef1234567890');
     toast.success('Código PIX copiado!');
   };
 
   if (isPaid) {
     return (
       <TenantLayout>
-        <div className="p-6 flex items-center justify-center min-h-[60vh]">
-          <Card className="bg-cs-bg-card border-cs-success max-w-md w-full">
-            <CardContent className="p-8 text-center space-y-4">
-              <div className="w-16 h-16 mx-auto rounded-full bg-cs-success/10 flex items-center justify-center">
-                <Check className="h-8 w-8 text-cs-success" />
+        <div className="p-6">
+          <Card className="bg-cs-bg-card border-border">
+            <CardContent className="p-12 text-center">
+              <div className="w-16 h-16 rounded-full bg-cs-success/10 flex items-center justify-center mx-auto mb-4">
+                <Check className="w-8 h-8 text-cs-success" />
               </div>
-              <h2 className="text-2xl font-bold text-foreground">Pagamento Confirmado!</h2>
-              <p className="text-muted-foreground">
-                O pagamento de {formatPrice(total)} foi processado com sucesso.
+              <h2 className="text-2xl font-bold text-foreground mb-2">Pagamento Confirmado!</h2>
+              <p className="text-muted-foreground mb-6">
+                Seu pagamento de {formatPrice(total)} foi processado com sucesso.
               </p>
-              <div className="pt-4 space-y-2">
-                <Button asChild className="w-full">
+              <div className="flex gap-4 justify-center">
+                <Button asChild variant="outline">
                   <Link to="/tenant/billing/invoices">Ver Faturas</Link>
                 </Button>
-                <Button asChild variant="outline" className="w-full">
-                  <Link to="/tenant/billing">Voltar para Cobrança</Link>
+                <Button asChild>
+                  <Link to="/tenant/dashboard">Ir para Dashboard</Link>
                 </Button>
               </div>
             </CardContent>
@@ -121,8 +160,8 @@ export default function TenantPayment() {
             </Link>
           </Button>
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Realizar Pagamento</h1>
-            <p className="text-muted-foreground">Fatura {invoice.invoiceNumber}</p>
+            <h1 className="text-2xl font-bold text-foreground">Pagamento</h1>
+            <p className="text-muted-foreground">Fatura #{invoice.invoiceNumber || invoice.id}</p>
           </div>
         </div>
 
@@ -135,95 +174,69 @@ export default function TenantPayment() {
                 <CardDescription>Escolha como deseja pagar</CardDescription>
               </CardHeader>
               <CardContent>
-                <RadioGroup 
-                  value={paymentMethod} 
-                  onValueChange={(v) => setPaymentMethod(v as PaymentMethodType)}
-                  className="space-y-3"
-                >
-                  <label 
-                    className={`flex items-center gap-4 p-4 rounded-lg border cursor-pointer transition-colors ${
-                      paymentMethod === 'credit_card' 
-                        ? 'border-primary bg-primary/5' 
-                        : 'border-border hover:border-primary/50'
-                    }`}
-                  >
-                    <RadioGroupItem value="credit_card" />
-                    <CreditCard className="h-5 w-5 text-primary" />
-                    <div className="flex-1">
-                      <p className="font-medium text-foreground">Cartão de Crédito</p>
-                      <p className="text-sm text-muted-foreground">Visa, Mastercard, Elo</p>
+                <RadioGroup value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as PaymentMethodType)}>
+                  <div className="space-y-4">
+                    <div className={`flex items-center space-x-4 p-4 rounded-lg border ${paymentMethod === 'credit_card' ? 'border-primary bg-primary/5' : 'border-border'}`}>
+                      <RadioGroupItem value="credit_card" id="credit_card" />
+                      <Label htmlFor="credit_card" className="flex items-center gap-3 cursor-pointer flex-1">
+                        <CreditCard className="w-5 h-5" />
+                        <div>
+                          <p className="font-medium">Cartão de Crédito</p>
+                          <p className="text-sm text-muted-foreground">Pagamento instantâneo</p>
+                        </div>
+                      </Label>
                     </div>
-                  </label>
-
-                  <label 
-                    className={`flex items-center gap-4 p-4 rounded-lg border cursor-pointer transition-colors ${
-                      paymentMethod === 'pix' 
-                        ? 'border-primary bg-primary/5' 
-                        : 'border-border hover:border-primary/50'
-                    }`}
-                  >
-                    <RadioGroupItem value="pix" />
-                    <QrCode className="h-5 w-5 text-primary" />
-                    <div className="flex-1">
-                      <p className="font-medium text-foreground">PIX</p>
-                      <p className="text-sm text-muted-foreground">Pagamento instantâneo</p>
+                    
+                    <div className={`flex items-center space-x-4 p-4 rounded-lg border ${paymentMethod === 'pix' ? 'border-primary bg-primary/5' : 'border-border'}`}>
+                      <RadioGroupItem value="pix" id="pix" />
+                      <Label htmlFor="pix" className="flex items-center gap-3 cursor-pointer flex-1">
+                        <QrCode className="w-5 h-5" />
+                        <div>
+                          <p className="font-medium">PIX</p>
+                          <p className="text-sm text-muted-foreground">Pagamento instantâneo via QR Code</p>
+                        </div>
+                      </Label>
                     </div>
-                  </label>
-
-                  <label 
-                    className={`flex items-center gap-4 p-4 rounded-lg border cursor-pointer transition-colors ${
-                      paymentMethod === 'boleto' 
-                        ? 'border-primary bg-primary/5' 
-                        : 'border-border hover:border-primary/50'
-                    }`}
-                  >
-                    <RadioGroupItem value="boleto" />
-                    <FileText className="h-5 w-5 text-primary" />
-                    <div className="flex-1">
-                      <p className="font-medium text-foreground">Boleto Bancário</p>
-                      <p className="text-sm text-muted-foreground">Vence em 3 dias úteis</p>
+                    
+                    <div className={`flex items-center space-x-4 p-4 rounded-lg border ${paymentMethod === 'boleto' ? 'border-primary bg-primary/5' : 'border-border'}`}>
+                      <RadioGroupItem value="boleto" id="boleto" />
+                      <Label htmlFor="boleto" className="flex items-center gap-3 cursor-pointer flex-1">
+                        <FileText className="w-5 h-5" />
+                        <div>
+                          <p className="font-medium">Boleto Bancário</p>
+                          <p className="text-sm text-muted-foreground">Compensação em até 3 dias úteis</p>
+                        </div>
+                      </Label>
                     </div>
-                  </label>
+                  </div>
                 </RadioGroup>
               </CardContent>
             </Card>
 
-            {/* Formulário específico do método */}
+            {/* Detalhes do método selecionado */}
             {paymentMethod === 'credit_card' && (
               <Card className="bg-cs-bg-card border-border">
                 <CardHeader>
                   <CardTitle>Dados do Cartão</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Número do Cartão</Label>
-                    <Input 
-                      placeholder="0000 0000 0000 0000" 
-                      className="bg-cs-bg-primary border-border"
-                    />
+                  <div>
+                    <Label htmlFor="cardNumber">Número do Cartão</Label>
+                    <Input id="cardNumber" placeholder="0000 0000 0000 0000" className="bg-cs-bg-primary border-border" />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Validade</Label>
-                      <Input 
-                        placeholder="MM/AA" 
-                        className="bg-cs-bg-primary border-border"
-                      />
+                    <div>
+                      <Label htmlFor="expiry">Validade</Label>
+                      <Input id="expiry" placeholder="MM/AA" className="bg-cs-bg-primary border-border" />
                     </div>
-                    <div className="space-y-2">
-                      <Label>CVV</Label>
-                      <Input 
-                        placeholder="123" 
-                        className="bg-cs-bg-primary border-border"
-                      />
+                    <div>
+                      <Label htmlFor="cvv">CVV</Label>
+                      <Input id="cvv" placeholder="000" className="bg-cs-bg-primary border-border" />
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Nome no Cartão</Label>
-                    <Input 
-                      placeholder="NOME COMPLETO" 
-                      className="bg-cs-bg-primary border-border"
-                    />
+                  <div>
+                    <Label htmlFor="cardName">Nome no Cartão</Label>
+                    <Input id="cardName" placeholder="Como está no cartão" className="bg-cs-bg-primary border-border" />
                   </div>
                 </CardContent>
               </Card>
@@ -232,13 +245,12 @@ export default function TenantPayment() {
             {paymentMethod === 'pix' && (
               <Card className="bg-cs-bg-card border-border">
                 <CardHeader>
-                  <CardTitle>Pague com PIX</CardTitle>
-                  <CardDescription>Escaneie o QR Code ou copie o código</CardDescription>
+                  <CardTitle>Pagamento via PIX</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex justify-center p-6 bg-white rounded-lg">
+                  <div className="flex justify-center p-4 bg-white rounded-lg">
                     <div className="w-48 h-48 bg-gray-200 rounded flex items-center justify-center">
-                      <QrCode className="h-32 w-32 text-gray-400" />
+                      <QrCode className="w-32 h-32 text-gray-600" />
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -248,9 +260,12 @@ export default function TenantPayment() {
                       className="bg-cs-bg-primary border-border"
                     />
                     <Button variant="outline" onClick={copyPixCode}>
-                      <Copy className="h-4 w-4" />
+                      <Copy className="w-4 h-4" />
                     </Button>
                   </div>
+                  <p className="text-sm text-muted-foreground text-center">
+                    Escaneie o QR Code ou copie o código PIX para pagar
+                  </p>
                 </CardContent>
               </Card>
             )}
@@ -259,69 +274,57 @@ export default function TenantPayment() {
               <Card className="bg-cs-bg-card border-border">
                 <CardHeader>
                   <CardTitle>Boleto Bancário</CardTitle>
-                  <CardDescription>O boleto será gerado após confirmar</CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground">
-                    Após confirmar, você receberá o boleto por e-mail e poderá baixá-lo aqui.
-                    O pagamento será confirmado em até 3 dias úteis após o pagamento.
+                <CardContent className="space-y-4">
+                  <p className="text-muted-foreground">
+                    O boleto será gerado após a confirmação. O prazo de compensação é de até 3 dias úteis.
                   </p>
                 </CardContent>
               </Card>
             )}
           </div>
 
-          {/* Resumo do pedido */}
+          {/* Resumo */}
           <div className="space-y-6">
-            <Card className="bg-cs-bg-card border-border sticky top-6">
+            <Card className="bg-cs-bg-card border-border">
               <CardHeader>
                 <CardTitle>Resumo</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-3">
-                  {invoice.items.map((item) => (
-                    <div key={item.id} className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">{item.description}</span>
-                      <span className="text-foreground">{formatPrice(item.total)}</span>
-                    </div>
-                  ))}
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="text-foreground">{formatPrice(subtotal)}</span>
                 </div>
-
+                
+                {appliedDiscount > 0 && (
+                  <div className="flex justify-between text-cs-success">
+                    <span>Desconto ({appliedCoupon})</span>
+                    <span>-{formatPrice(appliedDiscount)}</span>
+                  </div>
+                )}
+                
                 <div className="border-t border-border pt-4">
-                  <CouponInput 
-                    onApply={handleApplyCoupon}
-                    onRemove={handleRemoveCoupon}
-                    appliedCoupon={appliedCoupon}
-                    subtotal={subtotal}
-                  />
+                  <div className="flex justify-between text-lg font-bold">
+                    <span>Total</span>
+                    <span>{formatPrice(total)}</span>
+                  </div>
                 </div>
 
-                <div className="border-t border-border pt-4 space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Subtotal</span>
-                    <span className="text-foreground">{formatPrice(subtotal)}</span>
-                  </div>
-                  {discount > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-cs-success">Desconto</span>
-                      <span className="text-cs-success">-{formatPrice(discount)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-lg font-bold">
-                    <span className="text-foreground">Total</span>
-                    <span className="text-primary">{formatPrice(total)}</span>
-                  </div>
-                </div>
+                <CouponInput
+                  onApply={handleApplyCoupon}
+                  onRemove={handleRemoveCoupon}
+                  appliedCoupon={appliedCoupon}
+                  isValidating={isValidating}
+                />
 
                 <Button 
                   className="w-full bg-cs-cyan hover:bg-cs-cyan/90" 
-                  size="lg"
                   onClick={handlePayment}
-                  disabled={isProcessing}
+                  disabled={isPaying}
                 >
-                  {isProcessing ? (
+                  {isPaying ? (
                     <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Processando...
                     </>
                   ) : (

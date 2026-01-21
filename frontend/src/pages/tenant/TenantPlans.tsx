@@ -1,15 +1,15 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { TenantLayout } from '@/layouts/TenantLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Check, ArrowUp, ArrowDown, Sparkles, LayoutGrid } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ArrowLeft, Check, ArrowUp, ArrowDown, Sparkles, LayoutGrid, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { BillingCycleSelector } from '@/components/billing/BillingCycleSelector';
 import { PlanCard } from '@/components/billing/PlanCard';
 import { PlanChangeModal } from '@/components/billing/PlanChangeModal';
-import { getPublicPlans, getPlanById } from '@/config/plansConfig';
-import { mockSubscriptions } from '@/data/billingMockData';
+import { usePlans, useSubscription, useChangePlan } from '@/hooks/useBilling';
 import { BillingCycle, BILLING_CYCLE_DISCOUNTS, formatPrice, BillingPlan } from '@/types/billing';
 import { SubscriptionPeriod } from '@/lib/billingCalculations';
 import { toast } from 'sonner';
@@ -19,20 +19,39 @@ export default function TenantPlans() {
   const [selectedPlan, setSelectedPlan] = useState<BillingPlan | null>(null);
   const [showChangeModal, setShowChangeModal] = useState(false);
   
-  // Simula a assinatura atual do tenant
-  const currentSubscription = mockSubscriptions[0];
-  const currentPlan = getPlanById(currentSubscription.planId);
-  const publicPlans = getPublicPlans();
+  const { plans, isLoading: plansLoading, fetchPlans } = usePlans();
+  const { subscription, isLoading: subscriptionLoading, fetchSubscription } = useSubscription();
+  const { changePlan, isChanging } = useChangePlan();
+
+  const isLoading = plansLoading || subscriptionLoading;
+
+  useEffect(() => {
+    fetchPlans();
+    fetchSubscription();
+  }, []);
+
+  const handleRefresh = () => {
+    fetchPlans();
+    fetchSubscription();
+    toast.success('Dados atualizados');
+  };
+
+  // Plano atual
+  const currentPlan = plans.find(p => p.id === subscription?.planId);
+  const publicPlans = plans.filter(p => p.isPublic !== false);
   
   // Período atual da assinatura
-  const subscriptionPeriod: SubscriptionPeriod = useMemo(() => ({
-    startDate: new Date(currentSubscription.currentPeriodStart),
-    endDate: new Date(currentSubscription.currentPeriodEnd),
-    cycle: currentSubscription.billingCycle
-  }), [currentSubscription]);
+  const subscriptionPeriod: SubscriptionPeriod | null = useMemo(() => {
+    if (!subscription) return null;
+    return {
+      startDate: new Date(subscription.currentPeriodStart),
+      endDate: new Date(subscription.currentPeriodEnd),
+      cycle: subscription.billingCycle
+    };
+  }, [subscription]);
 
   const handleSelectPlan = (plan: BillingPlan) => {
-    if (plan.id === currentSubscription.planId) {
+    if (plan.id === subscription?.planId) {
       toast.info('Este já é o seu plano atual');
       return;
     }
@@ -40,16 +59,51 @@ export default function TenantPlans() {
     setShowChangeModal(true);
   };
 
-  const handleConfirmChange = () => {
-    // Atualizar estado (em produção, chamar API)
-    setSelectedPlan(null);
+  const handleConfirmChange = async () => {
+    if (!selectedPlan) return;
+    
+    try {
+      await changePlan(selectedPlan.id, billingCycle);
+      toast.success('Plano alterado com sucesso!');
+      setShowChangeModal(false);
+      setSelectedPlan(null);
+      fetchSubscription();
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao alterar plano');
+    }
   };
 
   const getPlanChangeType = (plan: BillingPlan): 'upgrade' | 'downgrade' | 'current' => {
     if (!currentPlan) return 'current';
     if (plan.id === currentPlan.id) return 'current';
-    return plan.sortOrder > currentPlan.sortOrder ? 'upgrade' : 'downgrade';
+    return (plan.sortOrder || 0) > (currentPlan.sortOrder || 0) ? 'upgrade' : 'downgrade';
   };
+
+  if (isLoading) {
+    return (
+      <TenantLayout>
+        <div className="p-6 space-y-6">
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-10 w-10" />
+            <div>
+              <Skeleton className="h-8 w-48 mb-2" />
+              <Skeleton className="h-4 w-64" />
+            </div>
+          </div>
+          <Card className="bg-cs-bg-card border-border">
+            <CardContent className="p-4">
+              <Skeleton className="h-20 w-full" />
+            </CardContent>
+          </Card>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-96 w-full" />
+            ))}
+          </div>
+        </div>
+      </TenantLayout>
+    );
+  }
 
   return (
     <TenantLayout>
@@ -67,104 +121,82 @@ export default function TenantPlans() {
               <p className="text-muted-foreground">Compare e escolha o melhor plano para você</p>
             </div>
           </div>
-          <Button asChild variant="outline">
-            <Link to="/plan-comparison">
-              <LayoutGrid className="h-4 w-4 mr-2" />
-              Ver Comparativo Completo
-            </Link>
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleRefresh}>
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Atualizar
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/plan-comparison">
+                <LayoutGrid className="h-4 w-4 mr-2" />
+                Ver Comparativo Completo
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {/* Plano atual */}
-        <Card className="bg-cs-bg-card border-primary/30">
-          <CardContent className="flex items-center justify-between p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <Check className="h-5 w-5 text-primary" />
+        {currentPlan && (
+          <Card className="bg-cs-bg-card border-primary/30">
+            <CardContent className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Sparkles className="w-6 h-6 text-primary" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Plano Atual</p>
+                  <p className="text-lg font-semibold text-foreground">{currentPlan.name}</p>
+                </div>
               </div>
-              <div>
-                <p className="font-medium text-foreground">
-                  Plano Atual: <span className="text-primary">{currentPlan?.name}</span>
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {formatPrice(currentPlan?.basePrice || 0)}/mês • 
-                  Renova em {new Date(currentSubscription.currentPeriodEnd).toLocaleDateString('pt-BR')}
-                </p>
-              </div>
-            </div>
-            <Badge variant="outline" className="text-cs-success border-cs-success/30">
-              Ativo
-            </Badge>
-          </CardContent>
-        </Card>
+              <Badge variant="outline" className="text-primary border-primary">
+                {subscription?.billingCycle === 'monthly' ? 'Mensal' : 
+                 subscription?.billingCycle === 'quarterly' ? 'Trimestral' :
+                 subscription?.billingCycle === 'semiannual' ? 'Semestral' : 'Anual'}
+              </Badge>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Seletor de ciclo */}
         <div className="flex justify-center">
-          <BillingCycleSelector value={billingCycle} onChange={setBillingCycle} />
+          <BillingCycleSelector
+            value={billingCycle}
+            onChange={setBillingCycle}
+          />
         </div>
 
-        {/* Desconto do ciclo */}
-        {BILLING_CYCLE_DISCOUNTS[billingCycle].discount > 0 && (
-          <div className="text-center">
-            <Badge className="bg-cs-success/10 text-cs-success border-cs-success/30 py-2 px-4">
-              <Sparkles className="h-4 w-4 mr-2" />
-              Economize {BILLING_CYCLE_DISCOUNTS[billingCycle].discount}% pagando {BILLING_CYCLE_DISCOUNTS[billingCycle].label.toLowerCase()}
-            </Badge>
-          </div>
-        )}
-
-        {/* Grid de planos */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {/* Lista de planos */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {publicPlans.map((plan) => {
             const changeType = getPlanChangeType(plan);
+            const isCurrent = plan.id === subscription?.planId;
             
             return (
-              <div key={plan.id} className="relative">
-                {/* Badge de upgrade/downgrade */}
-                {changeType !== 'current' && (
-                  <Badge 
-                    className={`absolute -top-2 -right-2 z-10 ${
-                      changeType === 'upgrade' 
-                        ? 'bg-cs-success text-white' 
-                        : 'bg-muted text-muted-foreground'
-                    }`}
-                  >
-                    {changeType === 'upgrade' ? (
-                      <><ArrowUp className="h-3 w-3 mr-1" /> Upgrade</>
-                    ) : (
-                      <><ArrowDown className="h-3 w-3 mr-1" /> Downgrade</>
-                    )}
-                  </Badge>
-                )}
-                
-                <PlanCard
-                  plan={plan}
-                  cycle={billingCycle}
-                  isCurrentPlan={plan.id === currentSubscription.planId}
-                  onSelect={(p) => handleSelectPlan(p)}
-                />
-              </div>
+              <PlanCard
+                key={plan.id}
+                plan={plan}
+                billingCycle={billingCycle}
+                isCurrent={isCurrent}
+                changeType={changeType}
+                onSelect={() => handleSelectPlan(plan)}
+              />
             );
           })}
         </div>
 
-        {/* Modal de confirmação de mudança */}
-        {selectedPlan && currentPlan && (
+        {/* Modal de mudança de plano */}
+        {selectedPlan && subscriptionPeriod && (
           <PlanChangeModal
             open={showChangeModal}
             onOpenChange={setShowChangeModal}
-            currentPlan={currentPlan}
+            currentPlan={currentPlan || null}
             newPlan={selectedPlan}
+            billingCycle={billingCycle}
             subscriptionPeriod={subscriptionPeriod}
             onConfirm={handleConfirmChange}
+            isLoading={isChanging}
           />
         )}
-
-        {/* Info adicional */}
-        <div className="text-center text-sm text-muted-foreground space-y-2 pt-4">
-          <p>💡 Upgrades são aplicados imediatamente com cobrança proporcional.</p>
-          <p>Downgrades geram crédito para próximas faturas.</p>
-        </div>
       </div>
     </TenantLayout>
   );

@@ -31,7 +31,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from 'sonner';
-import { nicheTemplates, getTemplateById, applyVariablesToPrompt } from '@/data/nicheTemplatesMock';
+import { fetchNicheTemplates, getTemplateById, applyVariablesToPrompt } from '@/services/templateService';
 import { NicheTemplate, NicheFAQ } from '@/types/nicheTemplate';
 
 // LocalStorage key for persisting IA config
@@ -176,6 +176,25 @@ const getDefaultConfig = (): IAConfigStorage => ({
 });
 
 export function TenantAIConfigTab() {
+  // Templates loaded from backend
+  const [nicheTemplates, setNicheTemplates] = useState<NicheTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+
+  // Load templates on mount
+  useEffect(() => {
+    const loadTemplates = async () => {
+      try {
+        const templates = await fetchNicheTemplates();
+        setNicheTemplates(templates);
+      } catch (error) {
+        console.error('Failed to load templates:', error);
+      } finally {
+        setTemplatesLoading(false);
+      }
+    };
+    loadTemplates();
+  }, []);
+
   // Checkbox toggles for Template and Custom
   const [useTemplate, setUseTemplate] = useState(true);
   const [useCustom, setUseCustom] = useState(false);
@@ -215,7 +234,7 @@ export function TenantAIConfigTab() {
   const [newFaq, setNewFaq] = useState({ question: '', answer: '', category: '' });
 
   // Selected template
-  const selectedTemplate = getTemplateById(selectedTemplateId);
+  const selectedTemplate = getTemplateById(nicheTemplates, selectedTemplateId);
   
   // Active templates only
   const activeTemplates = nicheTemplates.filter(t => t.isActive);

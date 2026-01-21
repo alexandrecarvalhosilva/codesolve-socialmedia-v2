@@ -13,9 +13,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useSoundNotification } from '@/hooks/useSoundNotification';
+import { useUrgentTickets } from '@/hooks/useSupport';
 
 interface UrgentTicket {
   id: string;
@@ -28,52 +30,38 @@ interface UrgentTicket {
   isNew?: boolean;
 }
 
-// Mock data for urgent tickets
-const mockUrgentTickets: UrgentTicket[] = [
-  {
-    id: 'ticket3',
-    title: 'Sistema lento ao carregar dashboard',
-    tenantName: 'TECH CORP',
-    slaLevel: 'Enterprise',
-    timeRemaining: 45,
-    priority: 'critical',
-    type: 'response',
-    isNew: true,
-  },
-  {
-    id: 'ticket6',
-    title: 'Erro ao processar pagamento',
-    tenantName: 'STARTUP XYZ',
-    slaLevel: 'Premium',
-    timeRemaining: 120,
-    priority: 'high',
-    type: 'resolution',
-  },
-  {
-    id: 'ticket7',
-    title: 'Integração WhatsApp offline',
-    tenantName: 'SIX BLADES',
-    slaLevel: 'Premium',
-    timeRemaining: 30,
-    priority: 'critical',
-    type: 'response',
-  },
-];
-
 export function SLAUrgentAlerts() {
-  const [tickets, setTickets] = useState<UrgentTicket[]>(mockUrgentTickets);
+  const { urgentTickets, isLoading, fetchUrgentTickets } = useUrgentTickets();
+  const [tickets, setTickets] = useState<UrgentTicket[]>([]);
   const [dismissed, setDismissed] = useState<string[]>([]);
   const { playSound, isMuted, toggleMute } = useSoundNotification();
-  const previousTicketIdsRef = useRef<Set<string>>(new Set(mockUrgentTickets.map(t => t.id)));
+  const previousTicketIdsRef = useRef<Set<string>>(new Set());
   const playedAlertsRef = useRef<Set<string>>(new Set());
+
+  // Fetch urgent tickets on mount
+  useEffect(() => {
+    fetchUrgentTickets();
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchUrgentTickets, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Update local state when data changes
+  useEffect(() => {
+    if (urgentTickets.length > 0) {
+      setTickets(urgentTickets.map(t => ({
+        ...t,
+        isNew: !previousTicketIdsRef.current.has(t.id)
+      })));
+      urgentTickets.forEach(t => previousTicketIdsRef.current.add(t.id));
+    }
+  }, [urgentTickets]);
 
   // Play sound for new tickets and SLA violations
   useEffect(() => {
     const visibleTickets = tickets.filter(t => !dismissed.includes(t.id) && t.timeRemaining > 0);
     
     visibleTickets.forEach(ticket => {
-      const alertKey = `${ticket.id}-${ticket.timeRemaining <= 30 ? 'critical' : ticket.timeRemaining <= 60 ? 'warning' : 'normal'}`;
-      
       // Check for new critical tickets
       if (ticket.isNew && ticket.priority === 'critical' && !playedAlertsRef.current.has(`new-${ticket.id}`)) {
         playSound('critical', `new-${ticket.id}`);
@@ -93,32 +81,6 @@ export function SLAUrgentAlerts() {
     });
   }, [tickets, dismissed, playSound]);
 
-  // Simulate new ticket arrival (for demo purposes)
-  useEffect(() => {
-    const demoNewTicket = setTimeout(() => {
-      const newTicket: UrgentTicket = {
-        id: 'ticket-new-' + Date.now(),
-        title: 'URGENTE: Falha no sistema de autenticação',
-        tenantName: 'MEGA CORP',
-        slaLevel: 'Enterprise',
-        timeRemaining: 25,
-        priority: 'critical',
-        type: 'response',
-        isNew: true,
-      };
-      
-      setTickets(prev => {
-        if (!previousTicketIdsRef.current.has(newTicket.id)) {
-          previousTicketIdsRef.current.add(newTicket.id);
-          return [newTicket, ...prev];
-        }
-        return prev;
-      });
-    }, 15000); // Demo: new ticket arrives after 15 seconds
-
-    return () => clearTimeout(demoNewTicket);
-  }, []);
-
   // Simulate real-time countdown
   useEffect(() => {
     const interval = setInterval(() => {
@@ -133,6 +95,21 @@ export function SLAUrgentAlerts() {
   }, []);
 
   const visibleTickets = tickets.filter(t => !dismissed.includes(t.id) && t.timeRemaining > 0);
+
+  if (isLoading) {
+    return (
+      <Card className="bg-card border-border">
+        <CardHeader className="pb-3">
+          <Skeleton className="h-6 w-48" />
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 w-full" />
+          ))}
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (visibleTickets.length === 0) return null;
 

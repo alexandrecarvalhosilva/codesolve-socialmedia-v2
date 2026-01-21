@@ -775,3 +775,135 @@ export function useAllModules(): UseAllModulesReturn {
 
   return { modules, isLoading, error, refetch: fetchModules, createModule, updateModule };
 }
+
+
+// ============================================================================
+// FINANCIAL KPIs HOOK
+// ============================================================================
+
+interface FinancialKPIs {
+  mrr: number;
+  mrrGrowth: number;
+  activeSubscriptions: number;
+  trialSubscriptions: number;
+  churnRate: number;
+  pendingRevenue: number;
+}
+
+interface UseFinancialKPIsReturn {
+  kpis: FinancialKPIs | null;
+  isLoading: boolean;
+  fetchKPIs: () => Promise<void>;
+}
+
+export function useFinancialKPIs(): UseFinancialKPIsReturn {
+  const [kpis, setKpis] = useState<FinancialKPIs | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const fetchKPIs = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const response = await api.get('/billing/kpis');
+      if (response.data.success) {
+        setKpis(response.data.data);
+      }
+    } catch (error) {
+      // Fallback data
+      setKpis({
+        mrr: 0,
+        mrrGrowth: 0,
+        activeSubscriptions: 0,
+        trialSubscriptions: 0,
+        churnRate: 0,
+        pendingRevenue: 0,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  return { kpis, isLoading, fetchKPIs };
+}
+
+// ============================================================================
+// MRR DATA HOOK
+// ============================================================================
+
+interface MrrDataPoint {
+  month: string;
+  revenue: number;
+}
+
+interface UseMrrDataReturn {
+  data: MrrDataPoint[];
+  isLoading: boolean;
+  fetchMrrData: () => Promise<void>;
+}
+
+export function useMrrData(): UseMrrDataReturn {
+  const [data, setData] = useState<MrrDataPoint[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const fetchMrrData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const response = await api.get('/billing/mrr-history');
+      if (response.data.success) {
+        setData(response.data.data || []);
+      }
+    } catch (error) {
+      setData([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  return { data, isLoading, fetchMrrData };
+}
+
+// ============================================================================
+// VALIDATE COUPON HOOK
+// ============================================================================
+
+interface ValidateCouponResult {
+  valid: boolean;
+  message?: string;
+  discountValue?: number;
+  discountType?: 'percent' | 'fixed';
+}
+
+interface UseValidateCouponReturn {
+  validateCoupon: (code: string, subtotal?: number) => Promise<ValidateCouponResult>;
+  isValidating: boolean;
+}
+
+export function useValidateCoupon(): UseValidateCouponReturn {
+  const [isValidating, setIsValidating] = useState(false);
+
+  const validateCoupon = useCallback(async (code: string, subtotal?: number): Promise<ValidateCouponResult> => {
+    setIsValidating(true);
+    try {
+      const response = await api.post('/billing/coupons/validate', { code, subtotal });
+      if (response.data.success) {
+        return {
+          valid: true,
+          discountValue: response.data.data.discountValue,
+          discountType: response.data.data.discountType,
+        };
+      }
+      return {
+        valid: false,
+        message: response.data.error?.message || 'Cupom inválido',
+      };
+    } catch (error: any) {
+      return {
+        valid: false,
+        message: error.response?.data?.error?.message || 'Erro ao validar cupom',
+      };
+    } finally {
+      setIsValidating(false);
+    }
+  }, []);
+
+  return { validateCoupon, isValidating };
+}

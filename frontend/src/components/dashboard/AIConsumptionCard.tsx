@@ -1,9 +1,56 @@
+import { useEffect } from 'react';
 import { Brain, Zap, DollarSign, Clock, TrendingUp, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { getGlobalAIMetrics, formatTokens, formatCurrency } from '@/data/aiConsumptionMockData';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAIConsumption } from '@/hooks/useAI';
+
+// Format helpers
+const formatTokens = (tokens: number): string => {
+  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
+  if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`;
+  return tokens.toString();
+};
+
+const formatCurrency = (value: number): string => {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  }).format(value);
+};
 
 export function AIConsumptionCard() {
-  const metrics = getGlobalAIMetrics();
+  const { consumption, isLoading, fetchConsumption } = useAIConsumption();
+
+  useEffect(() => {
+    fetchConsumption();
+  }, [fetchConsumption]);
+
+  if (isLoading) {
+    return (
+      <div className="bg-cs-bg-card border border-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <Skeleton className="h-10 w-40" />
+          <Skeleton className="h-4 w-20" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {[1, 2, 3, 4].map(i => (
+            <Skeleton key={i} className="h-20 w-full" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  const metrics = consumption || {
+    totalTokensToday: 0,
+    totalTokensMonth: 0,
+    estimatedCostToday: 0,
+    estimatedCostMonth: 0,
+    totalMessagesToday: 0,
+    activeTenantsToday: 0,
+    avgResponseTime: 0,
+    topModel: 'gpt-4',
+  };
 
   return (
     <div className="bg-cs-bg-card border border-border rounded-xl p-5">

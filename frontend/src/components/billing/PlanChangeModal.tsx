@@ -31,16 +31,16 @@ import {
   formatPlanChangeResult,
   SubscriptionPeriod 
 } from '@/lib/billingCalculations';
-import { processUpgrade, ProcessUpgradeResult } from '@/services/mockStripeService';
+import { processUpgrade, ProcessUpgradeResult } from '@/services/stripeService';
 import { 
   sendPlanChangeNotification, 
   sendCreditsEarnedNotification 
-} from '@/services/mockEmailNotificationService';
+} from '@/services/emailNotificationService';
 import { 
   addPlanChangeHistory, 
   addCreditTransaction,
   getTenantCreditBalance 
-} from '@/data/planChangeHistoryMock';
+} from '@/services/billingService';
 import { toast } from 'sonner';
 
 interface PlanChangeModalProps {
@@ -135,7 +135,7 @@ export function PlanChangeModal({
       // Parse card expiry
       const [expMonth, expYear] = cardExpiry.split('/').map(s => parseInt(s.trim()));
       
-      // Process payment via mock Stripe
+      // Process payment via Stripe service
       const upgradeResult = await processUpgrade({
         tenantId,
         tenantName,

@@ -1,8 +1,23 @@
 import { Check, X, Star } from 'lucide-react';
 import { BillingPlan, BillingCycle, formatPrice, calculateCyclePrice, BILLING_CYCLE_DISCOUNTS } from '@/types/billing';
-import { mockModules, getModuleBySlug } from '@/data/billingMockData';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
+// Module definitions
+const moduleDefinitions: Record<string, { name: string; description: string }> = {
+  whatsapp: { name: 'WhatsApp Business', description: 'Integração com WhatsApp' },
+  ai_basic: { name: 'IA Básica', description: 'Respostas automáticas simples' },
+  ai_advanced: { name: 'IA Avançada', description: 'IA com contexto e aprendizado' },
+  calendar: { name: 'Calendário', description: 'Agendamento de eventos' },
+  crm: { name: 'CRM', description: 'Gestão de relacionamento' },
+  reports: { name: 'Relatórios', description: 'Relatórios e analytics' },
+  multi_instance: { name: 'Multi-Instância', description: 'Múltiplas instâncias WhatsApp' },
+  api_access: { name: 'Acesso API', description: 'Acesso à API' },
+  white_label: { name: 'White Label', description: 'Personalização de marca' },
+  priority_support: { name: 'Suporte Prioritário', description: 'Suporte prioritário' },
+};
+
+const getModuleBySlug = (slug: string) => moduleDefinitions[slug] || null;
 
 interface PlanCardProps {
   plan: BillingPlan;
