@@ -26,6 +26,8 @@ import supportRoutes from './routes/support.js';
 import healthRoutes from './routes/health.js';
 import webhookRoutes from './routes/webhook.js';
 import contactsRoutes from './routes/contacts.js';
+import aiRoutes from './routes/ai.js';
+import templatesRoutes from './routes/templates.js';
 
 // Validate environment
 validateEnv();
@@ -120,6 +122,8 @@ app.use('/api/logs', logsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/contacts', contactsRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/templates', templatesRoutes);
 
 // Root endpoint
 app.get('/', (req: Request, res: Response) => {
