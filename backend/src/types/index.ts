@@ -81,6 +81,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'onboarding:manage', 'onboarding:skip',
     'whatsapp:instances:view', 'whatsapp:instances:create', 'whatsapp:instances:delete', 'whatsapp:qrcode:generate',
     'instagram:view', 'instagram:manage', 'instagram:posts', 'instagram:dms',
+    'templates:view', 'templates:create', 'templates:edit', 'templates:delete',
   ],
   admin: [
     'profile:view', 'profile:edit',
@@ -98,6 +99,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'billing:view_invoices', 'billing:make_payment', 'billing:manage_payment_methods',
     'whatsapp:instances:view', 'whatsapp:instances:create', 'whatsapp:instances:delete', 'whatsapp:qrcode:generate',
     'instagram:view', 'instagram:manage', 'instagram:posts', 'instagram:dms',
+    'templates:view', 'templates:create', 'templates:edit', 'templates:delete',
   ],
   operador: [
     'profile:view', 'profile:edit',
