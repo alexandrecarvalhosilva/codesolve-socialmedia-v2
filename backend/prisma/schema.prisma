@@ -59,6 +59,8 @@ model Tenant {
   googleOAuthTokens GoogleOAuthToken[]
   notifications     Notification[]
   auditLogs         AuditLog[]
+  contacts          Contact[]
+  contactLists      ContactList[]
   
   @@map("tenants")
 }
@@ -675,6 +677,103 @@ model InstagramDM {
   createdAt       DateTime              @default(now())
   
   @@map("instagram_dms")
+}
+
+// ============================================================================
+// CONTACTS
+// ============================================================================
+
+model Contact {
+  id                String       @id @default(uuid())
+  tenantId          String
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  // Contact info
+  phone             String?
+  email             String?
+  name              String
+  avatar            String?
+  
+  // Additional info
+  company           String?
+  position          String?
+  notes             String?
+  
+  // Tags for segmentation
+  tags              String[]     @default([])
+  
+  // Custom fields (JSON)
+  customFields      Json?        // { "field_name": "value" }
+  
+  // Source
+  source            ContactSource @default(manual)
+  
+  // Status
+  isActive          Boolean      @default(true)
+  isBlocked         Boolean      @default(false)
+  
+  // Timestamps
+  lastContactAt     DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
+  
+  // Relations
+  contactLists      ContactListMember[]
+  
+  @@unique([tenantId, phone])
+  @@unique([tenantId, email])
+  @@map("contacts")
+}
+
+enum ContactSource {
+  manual
+  whatsapp
+  instagram
+  import
+  api
+  form
+}
+
+model ContactList {
+  id                String       @id @default(uuid())
+  tenantId          String
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name              String
+  description       String?
+  color             String?      // For UI display
+  
+  // Dynamic list (based on filters) or static
+  isDynamic         Boolean      @default(false)
+  dynamicFilters    Json?        // { "tags": ["vip"], "source": "whatsapp" }
+  
+  // Stats (cached)
+  memberCount       Int          @default(0)
+  
+  // Timestamps
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
+  
+  // Relations
+  members           ContactListMember[]
+  
+  @@unique([tenantId, name])
+  @@map("contact_lists")
+}
+
+model ContactListMember {
+  id            String       @id @default(uuid())
+  contactId     String
+  contact       Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  listId        String
+  list          ContactList  @relation(fields: [listId], references: [id], onDelete: Cascade)
+  
+  addedAt       DateTime     @default(now())
+  
+  @@unique([contactId, listId])
+  @@map("contact_list_members")
 }
 
 // ============================================================================
