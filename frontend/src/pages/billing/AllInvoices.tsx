@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DashboardLayout } from '@/layouts/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import { 
   Select,
   SelectContent,
@@ -17,10 +18,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Search, Plus, Download, FileText, Calendar, CreditCard } from 'lucide-react';
+import { Search, Plus, Download, FileText, RefreshCw } from 'lucide-react';
 import { InvoiceTable } from '@/components/billing/InvoiceTable';
 import { StatusBadge } from '@/components/billing/StatusBadge';
-import { mockInvoices } from '@/data/billingMockData';
+import { useInvoices } from '@/hooks/useBilling';
 import { Invoice, InvoiceStatus, formatPrice } from '@/types/billing';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -31,22 +32,29 @@ export default function AllInvoices() {
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | 'all'>('all');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  
+  const { invoices, isLoading, error, fetchInvoices } = useInvoices();
 
-  // Filtrar faturas
-  const filteredInvoices = mockInvoices.filter(invoice => {
+  useEffect(() => {
+    fetchInvoices({
+      status: statusFilter !== 'all' ? statusFilter : undefined,
+    });
+  }, [statusFilter]);
+
+  // Filtrar faturas localmente por busca
+  const filteredInvoices = invoices.filter(invoice => {
     const matchesSearch = 
       invoice.invoiceNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
       invoice.tenantName.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || invoice.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    return matchesSearch;
   });
 
   // Estatísticas
   const stats = {
-    total: mockInvoices.reduce((sum, inv) => sum + inv.total, 0),
-    paid: mockInvoices.filter(i => i.status === 'paid').reduce((sum, inv) => sum + inv.total, 0),
-    pending: mockInvoices.filter(i => i.status === 'pending').reduce((sum, inv) => sum + inv.total, 0),
-    overdue: mockInvoices.filter(i => i.status === 'overdue').reduce((sum, inv) => sum + inv.total, 0),
+    total: invoices.reduce((sum, inv) => sum + inv.total, 0),
+    paid: invoices.filter(i => i.status === 'paid').reduce((sum, inv) => sum + inv.total, 0),
+    pending: invoices.filter(i => i.status === 'pending').reduce((sum, inv) => sum + inv.total, 0),
+    overdue: invoices.filter(i => i.status === 'overdue').reduce((sum, inv) => sum + inv.total, 0),
   };
 
   const handleView = (invoice: Invoice) => {
@@ -91,6 +99,43 @@ export default function AllInvoices() {
     toast.success('Faturas exportadas com sucesso!');
   };
 
+  const handleRefresh = () => {
+    fetchInvoices({
+      status: statusFilter !== 'all' ? statusFilter : undefined,
+    });
+    toast.success('Lista atualizada');
+  };
+
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="p-6 space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <Skeleton className="h-8 w-48 mb-2" />
+              <Skeleton className="h-4 w-64" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i} className="bg-cs-bg-card border-border">
+                <CardContent className="p-4">
+                  <Skeleton className="h-4 w-24 mb-2" />
+                  <Skeleton className="h-8 w-32" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <Card className="bg-cs-bg-card border-border">
+            <CardContent className="p-4">
+              <Skeleton className="h-10 w-full" />
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
@@ -101,6 +146,10 @@ export default function AllInvoices() {
             <p className="text-muted-foreground">Gerencie as faturas de todos os tenants</p>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" onClick={handleRefresh}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Atualizar
+            </Button>
             <Button variant="outline" onClick={handleExportAll}>
               <Download className="h-4 w-4 mr-2" />
               Exportar

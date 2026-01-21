@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   MessageCircle, 
   Mail, 
@@ -12,11 +12,15 @@ import {
   MessageSquare,
   Calendar,
   Settings as SettingsIcon,
-  ChevronRight
+  ChevronRight,
+  RefreshCw
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { StatusPill } from '@/components/dashboard/StatusPill';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useDashboardMetrics, useDashboardCharts } from '@/hooks/useDashboard';
+import { toast } from 'sonner';
 import {
   LineChart,
   Line,
@@ -33,353 +37,309 @@ import {
 const periodOptions = ['7 dias', '30 dias', '3 meses'] as const;
 type Period = typeof periodOptions[number];
 
-interface MetricItem {
-  value: string;
-  subtitle: string;
-  change: string;
-}
-
-interface MetricsData {
-  conversas: MetricItem;
-  mensagens: MetricItem;
-  operadores: MetricItem;
-  taxaResposta: MetricItem;
-  tempoMedio: MetricItem;
-}
-
-// Metrics by period
-const metricsDataByPeriod: Record<Period, MetricsData> = {
-  '7 dias': {
-    conversas: { value: '287', subtitle: 'Últimos 7 dias', change: '+12%' },
-    mensagens: { value: '2.134', subtitle: 'Processadas', change: '+8%' },
-    operadores: { value: '12', subtitle: 'Ativos', change: '0%' },
-    taxaResposta: { value: '92%', subtitle: 'Média', change: '-2%' },
-    tempoMedio: { value: '2.8min', subtitle: 'Resposta', change: '+0.3min' }
-  },
-  '30 dias': {
-    conversas: { value: '1.250', subtitle: 'Este mês', change: '+18%' },
-    mensagens: { value: '8.934', subtitle: 'Processadas', change: '+15%' },
-    operadores: { value: '12', subtitle: 'Ativos', change: '+2' },
-    taxaResposta: { value: '94%', subtitle: 'Média', change: '+3%' },
-    tempoMedio: { value: '2.5min', subtitle: 'Resposta', change: '-0.5min' }
-  },
-  '3 meses': {
-    conversas: { value: '4.520', subtitle: 'Últimos 3 meses', change: '+45%' },
-    mensagens: { value: '32.450', subtitle: 'Processadas', change: '+38%' },
-    operadores: { value: '14', subtitle: 'Máximo ativo', change: '+4' },
-    taxaResposta: { value: '91%', subtitle: 'Média', change: '+5%' },
-    tempoMedio: { value: '3.1min', subtitle: 'Resposta', change: '-0.8min' }
-  }
+const periodToApi: Record<Period, string> = {
+  '7 dias': '7d',
+  '30 dias': '30d',
+  '3 meses': '90d'
 };
-
-// Chart data by period
-const conversationTrendByPeriod: Record<Period, { day: string; conversas: number }[]> = {
-  '7 dias': [
-    { day: 'Seg', conversas: 35 },
-    { day: 'Ter', conversas: 42 },
-    { day: 'Qua', conversas: 38 },
-    { day: 'Qui', conversas: 51 },
-    { day: 'Sex', conversas: 48 },
-    { day: 'Sáb', conversas: 32 },
-    { day: 'Dom', conversas: 41 }
-  ],
-  '30 dias': [
-    { day: 'Sem 1', conversas: 280 },
-    { day: 'Sem 2', conversas: 320 },
-    { day: 'Sem 3', conversas: 295 },
-    { day: 'Sem 4', conversas: 355 }
-  ],
-  '3 meses': [
-    { day: 'Jan', conversas: 1200 },
-    { day: 'Fev', conversas: 1450 },
-    { day: 'Mar', conversas: 1870 }
-  ]
-};
-
-const timeDistributionByPeriod: Record<Period, { range: string; count: number }[]> = {
-  '7 dias': [
-    { range: '0-1min', count: 54 },
-    { range: '1-2min', count: 42 },
-    { range: '2-3min', count: 35 },
-    { range: '3-5min', count: 28 },
-    { range: '5+min', count: 18 }
-  ],
-  '30 dias': [
-    { range: '0-1min', count: 234 },
-    { range: '1-2min', count: 180 },
-    { range: '2-3min', count: 150 },
-    { range: '3-5min', count: 120 },
-    { range: '5+min', count: 80 }
-  ],
-  '3 meses': [
-    { range: '0-1min', count: 890 },
-    { range: '1-2min', count: 720 },
-    { range: '2-3min', count: 580 },
-    { range: '3-5min', count: 450 },
-    { range: '5+min', count: 320 }
-  ]
-};
-
-const topOperadoresByPeriod: Record<Period, { rank: number; name: string; conversations: number; percentage: number }[]> = {
-  '7 dias': [
-    { rank: 1, name: 'Maria Santos', conversations: 45, percentage: 96 },
-    { rank: 2, name: 'João Silva', conversations: 38, percentage: 92 },
-    { rank: 3, name: 'Pedro Costa', conversations: 32, percentage: 89 }
-  ],
-  '30 dias': [
-    { rank: 1, name: 'Maria Santos', conversations: 180, percentage: 95 },
-    { rank: 2, name: 'João Silva', conversations: 165, percentage: 91 },
-    { rank: 3, name: 'Pedro Costa', conversations: 142, percentage: 88 },
-    { rank: 4, name: 'Ana Lima', conversations: 128, percentage: 94 },
-    { rank: 5, name: 'Carlos Souza', conversations: 110, percentage: 86 }
-  ],
-  '3 meses': [
-    { rank: 1, name: 'Maria Santos', conversations: 520, percentage: 94 },
-    { rank: 2, name: 'João Silva', conversations: 485, percentage: 90 },
-    { rank: 3, name: 'Pedro Costa', conversations: 410, percentage: 87 },
-    { rank: 4, name: 'Ana Lima', conversations: 380, percentage: 93 },
-    { rank: 5, name: 'Carlos Souza', conversations: 350, percentage: 85 }
-  ]
-};
-
-// Integration status
-const integrationStatus = [
-  { label: 'WhatsApp', status: '3/3', color: 'bg-cs-success' },
-  { label: 'MCP', status: '1.250 docs', color: 'bg-cs-cyan' },
-  { label: 'RAG', status: '450 FAQs', color: 'bg-cs-cyan' },
-  { label: 'Tokens', status: '45%', color: 'bg-cs-warning' }
-];
-
-// Critical alerts
-const alertsCriticos = [
-  { message: 'Taxa de resposta baixa em horário comercial (35%)', action: 'Resolver →' },
-  { message: 'Tokens OpenAI em 45% (limite próximo)', action: 'Aumentar →' }
-];
-
-// Opportunities
-const oportunidades = [
-  { value: '+R$ 1.200/mês', description: 'Aumentar FAQ de 450 para 600 itens' },
-  { value: '+R$ 850/mês', description: 'Ativar resposta automática para 5 categorias' }
-];
-
-// Automations
-const automacoes = [
-  { name: 'Resposta FAQ', status: 'Ativa' },
-  { name: 'Escalação', status: 'Ativa' },
-  { name: 'Feedback', status: 'Pausada' }
-];
-
-// Quick actions
-const quickActions = [
-  { label: 'Chat', icon: MessageSquare, to: '/tenant/chat', color: 'text-cs-cyan' },
-  { label: 'Calendário', icon: Calendar, to: '/tenant/calendar', color: 'text-purple-400' },
-  { label: 'Automações', icon: Bot, to: '/tenant/automations', color: 'text-cs-success' }
-];
 
 export function TenantDashboardTab() {
-  const [selectedPeriod, setSelectedPeriod] = useState<Period>('30 dias');
+  const [selectedPeriod, setSelectedPeriod] = useState<Period>('7 dias');
+  const { metrics, isLoading: metricsLoading, fetchMetrics } = useDashboardMetrics();
+  const { charts, isLoading: chartsLoading, fetchCharts } = useDashboardCharts();
 
-  // Get data based on selected period
-  const metricsData = metricsDataByPeriod[selectedPeriod];
-  const conversationTrendData = conversationTrendByPeriod[selectedPeriod];
-  const timeDistributionData = timeDistributionByPeriod[selectedPeriod];
-  const topOperadores = topOperadoresByPeriod[selectedPeriod];
+  const isLoading = metricsLoading || chartsLoading;
 
-  return (
-    <div className="space-y-6">
-      {/* Quick Actions + Integration Status */}
-      <div className="bg-cs-bg-card border border-border rounded-xl p-4">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          {/* Quick Actions */}
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-cs-text-secondary">Acesso rápido:</span>
-            {quickActions.map((action) => (
-              <Link key={action.label} to={action.to}>
-                <Button variant="outline" size="sm" className="border-border hover:border-cs-cyan/50">
-                  <action.icon className={`w-4 h-4 mr-2 ${action.color}`} />
-                  {action.label}
-                </Button>
-              </Link>
-            ))}
+  useEffect(() => {
+    const period = periodToApi[selectedPeriod];
+    fetchMetrics(period);
+    fetchCharts(period);
+  }, [selectedPeriod]);
+
+  const handleRefresh = () => {
+    const period = periodToApi[selectedPeriod];
+    fetchMetrics(period);
+    fetchCharts(period);
+    toast.success('Dashboard atualizado');
+  };
+
+  // Fallback data
+  const metricsData = {
+    conversas: { 
+      value: metrics?.conversations?.toString() || '0', 
+      subtitle: `Últimos ${selectedPeriod}`, 
+      change: metrics?.conversationsChange ? `${metrics.conversationsChange > 0 ? '+' : ''}${metrics.conversationsChange}%` : '0%' 
+    },
+    mensagens: { 
+      value: metrics?.messages?.toLocaleString() || '0', 
+      subtitle: 'Processadas', 
+      change: metrics?.messagesChange ? `${metrics.messagesChange > 0 ? '+' : ''}${metrics.messagesChange}%` : '0%' 
+    },
+    operadores: { 
+      value: metrics?.operators?.toString() || '0', 
+      subtitle: 'Ativos', 
+      change: metrics?.operatorsChange ? `${metrics.operatorsChange > 0 ? '+' : ''}${metrics.operatorsChange}` : '0' 
+    },
+    taxaResposta: { 
+      value: `${metrics?.responseRate || 0}%`, 
+      subtitle: 'Média', 
+      change: metrics?.responseRateChange ? `${metrics.responseRateChange > 0 ? '+' : ''}${metrics.responseRateChange}%` : '0%' 
+    },
+    tempoMedio: { 
+      value: metrics?.avgResponseTime || '0min', 
+      subtitle: 'Resposta', 
+      change: metrics?.avgResponseTimeChange || '0min' 
+    }
+  };
+
+  const conversationTrend = charts?.conversationTrend || [
+    { day: 'Seg', conversas: 0 },
+    { day: 'Ter', conversas: 0 },
+    { day: 'Qua', conversas: 0 },
+    { day: 'Qui', conversas: 0 },
+    { day: 'Sex', conversas: 0 },
+    { day: 'Sáb', conversas: 0 },
+    { day: 'Dom', conversas: 0 },
+  ];
+
+  const channelDistribution = charts?.channelDistribution || [
+    { channel: 'WhatsApp', value: 0 },
+    { channel: 'Instagram', value: 0 },
+    { channel: 'Email', value: 0 },
+  ];
+
+  const quickActions = [
+    { icon: MessageSquare, label: 'Abrir Chat', to: '/tenant/chat', color: 'text-cs-cyan' },
+    { icon: Bot, label: 'Config. IA', to: '/tenant/ai/config', color: 'text-purple-500' },
+    { icon: Calendar, label: 'Agenda', to: '/tenant/calendar', color: 'text-green-500' },
+    { icon: SettingsIcon, label: 'Configurações', to: '/tenant/config', color: 'text-orange-500' },
+  ];
+
+  const alerts = metrics?.alerts || [];
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6 p-6">
+        {/* Period selector skeleton */}
+        <div className="flex justify-between items-center">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-10 w-28" />
+        </div>
+
+        {/* Metrics skeleton */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="bg-cs-bg-card border border-border rounded-xl p-4">
+              <Skeleton className="h-4 w-20 mb-2" />
+              <Skeleton className="h-8 w-16 mb-1" />
+              <Skeleton className="h-3 w-24" />
+            </div>
+          ))}
+        </div>
+
+        {/* Charts skeleton */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-cs-bg-card border border-border rounded-xl p-6">
+            <Skeleton className="h-6 w-40 mb-4" />
+            <Skeleton className="h-48 w-full" />
           </div>
-
-          {/* Integration Status */}
-          <div className="flex items-center gap-4 text-sm">
-            {integrationStatus.map((item) => (
-              <div key={item.label} className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${item.color}`} />
-                <span className="text-cs-text-secondary">{item.label}: {item.status}</span>
-                <SettingsIcon className="w-3 h-3 text-cs-text-muted cursor-pointer hover:text-cs-cyan" />
-              </div>
-            ))}
+          <div className="bg-cs-bg-card border border-border rounded-xl p-6">
+            <Skeleton className="h-6 w-40 mb-4" />
+            <Skeleton className="h-48 w-full" />
           </div>
         </div>
       </div>
+    );
+  }
 
+  return (
+    <div className="space-y-6 p-6">
       {/* Period Selector */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-cs-text-secondary">Período:</span>
-        {periodOptions.map((period) => (
-          <Button 
-            key={period}
-            variant={selectedPeriod === period ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setSelectedPeriod(period)}
-            className={selectedPeriod === period ? 'bg-cs-cyan text-white' : 'border-border text-cs-text-secondary hover:text-cs-text-primary'}
-          >
-            {period}
-          </Button>
-        ))}
+      <div className="flex justify-between items-center">
+        <div className="flex gap-2">
+          {periodOptions.map((period) => (
+            <Button
+              key={period}
+              variant={selectedPeriod === period ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setSelectedPeriod(period)}
+              className={selectedPeriod === period ? 'bg-cs-cyan hover:bg-cs-cyan/90' : ''}
+            >
+              {period}
+            </Button>
+          ))}
+        </div>
+        <Button variant="outline" size="sm" onClick={handleRefresh}>
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Atualizar
+        </Button>
       </div>
 
-      {/* Main Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        {(Object.entries(metricsData) as [string, MetricItem][]).map(([key, data]) => (
-          <div key={key} className="bg-cs-bg-card border border-border rounded-xl p-4">
-            <p className="text-sm text-cs-text-secondary capitalize">{key.replace(/([A-Z])/g, ' $1')}</p>
-            <p className="text-3xl font-bold text-cs-text-primary mt-1">{data.value}</p>
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-cs-text-muted">{data.subtitle}</p>
-              <p className={`text-xs font-medium ${data.change.startsWith('+') ? 'text-cs-success' : data.change.startsWith('-') ? 'text-cs-error' : 'text-cs-text-muted'}`}>
-                {data.change}
-              </p>
-            </div>
+      {/* Metrics Grid */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="bg-cs-bg-card border border-border rounded-xl p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-2">
+            <MessageCircle className="w-4 h-4" />
+            <span className="text-sm">Conversas</span>
           </div>
-        ))}
+          <p className="text-2xl font-bold text-foreground">{metricsData.conversas.value}</p>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-xs text-muted-foreground">{metricsData.conversas.subtitle}</span>
+            <span className={`text-xs ${metricsData.conversas.change.startsWith('+') ? 'text-cs-success' : metricsData.conversas.change.startsWith('-') ? 'text-cs-error' : 'text-muted-foreground'}`}>
+              {metricsData.conversas.change}
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-cs-bg-card border border-border rounded-xl p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-2">
+            <Mail className="w-4 h-4" />
+            <span className="text-sm">Mensagens</span>
+          </div>
+          <p className="text-2xl font-bold text-foreground">{metricsData.mensagens.value}</p>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-xs text-muted-foreground">{metricsData.mensagens.subtitle}</span>
+            <span className={`text-xs ${metricsData.mensagens.change.startsWith('+') ? 'text-cs-success' : metricsData.mensagens.change.startsWith('-') ? 'text-cs-error' : 'text-muted-foreground'}`}>
+              {metricsData.mensagens.change}
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-cs-bg-card border border-border rounded-xl p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-2">
+            <Users className="w-4 h-4" />
+            <span className="text-sm">Operadores</span>
+          </div>
+          <p className="text-2xl font-bold text-foreground">{metricsData.operadores.value}</p>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-xs text-muted-foreground">{metricsData.operadores.subtitle}</span>
+            <span className="text-xs text-muted-foreground">{metricsData.operadores.change}</span>
+          </div>
+        </div>
+
+        <div className="bg-cs-bg-card border border-border rounded-xl p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-2">
+            <Percent className="w-4 h-4" />
+            <span className="text-sm">Taxa Resposta</span>
+          </div>
+          <p className="text-2xl font-bold text-foreground">{metricsData.taxaResposta.value}</p>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-xs text-muted-foreground">{metricsData.taxaResposta.subtitle}</span>
+            <span className={`text-xs ${metricsData.taxaResposta.change.startsWith('+') ? 'text-cs-success' : metricsData.taxaResposta.change.startsWith('-') ? 'text-cs-error' : 'text-muted-foreground'}`}>
+              {metricsData.taxaResposta.change}
+            </span>
+          </div>
+        </div>
+
+        <div className="bg-cs-bg-card border border-border rounded-xl p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-2">
+            <Clock className="w-4 h-4" />
+            <span className="text-sm">Tempo Médio</span>
+          </div>
+          <p className="text-2xl font-bold text-foreground">{metricsData.tempoMedio.value}</p>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-xs text-muted-foreground">{metricsData.tempoMedio.subtitle}</span>
+            <span className="text-xs text-muted-foreground">{metricsData.tempoMedio.change}</span>
+          </div>
+        </div>
       </div>
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Conversation Trend */}
-        <div className="bg-cs-bg-card border border-border rounded-xl p-4">
-          <h3 className="font-semibold text-cs-text-primary mb-2">Tendência de Conversas</h3>
-          <p className="text-xs text-cs-text-muted mb-4">Volume no período selecionado</p>
+        <div className="bg-cs-bg-card border border-border rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-foreground mb-4">Tendência de Conversas</h3>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={conversationTrendData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="day" stroke="hsl(var(--cs-text-muted))" fontSize={12} />
-              <YAxis stroke="hsl(var(--cs-text-muted))" fontSize={12} />
+            <LineChart data={conversationTrend}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+              <XAxis dataKey="day" stroke="#888" />
+              <YAxis stroke="#888" />
               <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'hsl(var(--cs-bg-card))', 
-                  border: '1px solid hsl(var(--border))',
-                  borderRadius: '8px'
-                }} 
+                contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #333' }}
               />
-              <Line type="monotone" dataKey="conversas" stroke="hsl(var(--cs-cyan))" strokeWidth={2} dot />
+              <Line 
+                type="monotone" 
+                dataKey="conversas" 
+                stroke="#00d4ff" 
+                strokeWidth={2}
+                dot={{ fill: '#00d4ff' }}
+              />
             </LineChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Time Distribution */}
-        <div className="bg-cs-bg-card border border-border rounded-xl p-4">
-          <h3 className="font-semibold text-cs-text-primary mb-2">Tempo de Resposta</h3>
-          <p className="text-xs text-cs-text-muted mb-4">Distribuição por faixa de tempo</p>
+        {/* Channel Distribution */}
+        <div className="bg-cs-bg-card border border-border rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-foreground mb-4">Distribuição por Canal</h3>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={timeDistributionData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-              <XAxis dataKey="range" stroke="hsl(var(--cs-text-muted))" fontSize={12} />
-              <YAxis stroke="hsl(var(--cs-text-muted))" fontSize={12} />
+            <BarChart data={channelDistribution}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+              <XAxis dataKey="channel" stroke="#888" />
+              <YAxis stroke="#888" />
               <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'hsl(var(--cs-bg-card))', 
-                  border: '1px solid hsl(var(--border))',
-                  borderRadius: '8px'
-                }} 
+                contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #333' }}
               />
-              <Bar dataKey="count" fill="hsl(var(--cs-cyan))" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="value" fill="#00d4ff" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      {/* Alerts + Opportunities Row */}
+      {/* Quick Actions & Alerts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Alerts Section */}
-        <div className="bg-cs-bg-card border border-cs-error/30 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle className="w-4 h-4 text-cs-error" />
-            <h3 className="font-semibold text-cs-error">Alertas Críticos</h3>
-          </div>
-          {alertsCriticos.length > 0 ? (
-            <ul className="space-y-2">
-              {alertsCriticos.map((alert, idx) => (
-                <li key={idx} className="flex items-center justify-between text-sm">
-                  <span className="text-cs-text-secondary">• {alert.message}</span>
-                  <button className="text-cs-cyan hover:underline text-xs">{alert.action}</button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-cs-text-muted">Nenhum alerta crítico</p>
-          )}
-        </div>
-
-        {/* Opportunities Section */}
-        <div className="bg-cs-bg-card border border-cs-success/30 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <TrendingUp className="w-4 h-4 text-cs-success" />
-            <h3 className="font-semibold text-cs-success">Oportunidades de Ganho</h3>
-          </div>
-          <ul className="space-y-2">
-            {oportunidades.map((item, idx) => (
-              <li key={idx} className="text-sm">
-                <span className="text-cs-success font-medium">{item.value}:</span>{' '}
-                <span className="text-cs-text-secondary">{item.description}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      {/* Top Operators + Automations Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Top Operators */}
-        <div className="lg:col-span-2 bg-cs-bg-card border border-border rounded-xl p-4">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-cs-text-primary">Top Operadores</h3>
-            <span className="text-xs text-cs-text-muted">Por taxa de resposta</span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {topOperadores.slice(0, 6).map((op) => (
-              <div key={op.rank} className="flex items-center gap-3 p-2 rounded-lg bg-cs-bg-primary/50">
-                <span className="w-7 h-7 flex items-center justify-center bg-cs-cyan text-white text-xs rounded-full font-bold">
-                  {op.rank}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-cs-text-primary truncate">{op.name}</p>
-                  <p className="text-xs text-cs-text-muted">{op.conversations} conv</p>
-                </div>
-                <span className="text-cs-success font-semibold text-sm">{op.percentage}%</span>
-              </div>
+        {/* Quick Actions */}
+        <div className="bg-cs-bg-card border border-border rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-foreground mb-4">Ações Rápidas</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {quickActions.map((action) => (
+              <Link
+                key={action.label}
+                to={action.to}
+                className="flex items-center gap-3 p-3 bg-cs-bg-primary rounded-lg border border-border hover:border-cs-cyan/50 transition-colors"
+              >
+                <action.icon className={`w-5 h-5 ${action.color}`} />
+                <span className="text-sm text-foreground">{action.label}</span>
+                <ChevronRight className="w-4 h-4 text-muted-foreground ml-auto" />
+              </Link>
             ))}
           </div>
         </div>
 
-        {/* Automations */}
-        <div className="bg-cs-bg-card border border-border rounded-xl p-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Bot className="w-4 h-4 text-cs-cyan" />
-              <h3 className="font-semibold text-cs-text-primary">Automações</h3>
+        {/* Alerts */}
+        <div className="bg-cs-bg-card border border-border rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-cs-warning" />
+            Alertas
+          </h3>
+          {alerts.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <TrendingUp className="w-12 h-12 mx-auto mb-2 opacity-50" />
+              <p>Nenhum alerta no momento</p>
             </div>
-            <Link to="/tenant/automations">
-              <Button variant="ghost" size="sm" className="text-cs-cyan hover:text-cs-cyan/80 h-6 px-2">
-                Ver todas <ChevronRight className="w-3 h-3 ml-1" />
-              </Button>
-            </Link>
-          </div>
-          <ul className="space-y-3">
-            {automacoes.map((auto) => (
-              <li key={auto.name} className="flex items-center justify-between p-2 rounded-lg bg-cs-bg-primary/50">
-                <span className="text-sm text-cs-text-primary">{auto.name}</span>
-                <StatusPill 
-                  status={auto.status === 'Ativa' ? 'success' : 'warning'} 
-                  label={auto.status} 
-                />
-              </li>
-            ))}
-          </ul>
+          ) : (
+            <div className="space-y-3">
+              {alerts.map((alert: any, index: number) => (
+                <div 
+                  key={index}
+                  className={`flex items-center gap-3 p-3 rounded-lg ${
+                    alert.type === 'error' ? 'bg-cs-error/10 border border-cs-error/30' :
+                    alert.type === 'warning' ? 'bg-cs-warning/10 border border-cs-warning/30' :
+                    'bg-cs-cyan/10 border border-cs-cyan/30'
+                  }`}
+                >
+                  <AlertTriangle className={`w-5 h-5 ${
+                    alert.type === 'error' ? 'text-cs-error' :
+                    alert.type === 'warning' ? 'text-cs-warning' :
+                    'text-cs-cyan'
+                  }`} />
+                  <div className="flex-1">
+                    <p className="text-sm text-foreground">{alert.message}</p>
+                    <p className="text-xs text-muted-foreground">{alert.time}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

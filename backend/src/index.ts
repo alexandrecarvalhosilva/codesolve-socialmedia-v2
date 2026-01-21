@@ -28,6 +28,8 @@ import webhookRoutes from './routes/webhook.js';
 import contactsRoutes from './routes/contacts.js';
 import aiRoutes from './routes/ai.js';
 import templatesRoutes from './routes/templates.js';
+import rolesRoutes from './routes/roles.js';
+import modulesRoutes from './routes/modules.js';
 
 // Validate environment
 validateEnv();
@@ -124,6 +126,8 @@ app.use('/api/support', supportRoutes);
 app.use('/api/contacts', contactsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/templates', templatesRoutes);
+app.use('/api/roles', rolesRoutes);
+app.use('/api/modules', modulesRoutes);
 
 // Root endpoint
 app.get('/', (req: Request, res: Response) => {

@@ -11,12 +11,13 @@ import {
   CreditCard,
   ArrowUpRight,
   ArrowDownRight,
-  ChevronRight
+  ChevronRight,
+  RefreshCw
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { FinancialKPICard } from '@/components/billing/FinancialKPICard';
 import { InvoiceTable } from '@/components/billing/InvoiceTable';
-import { mockFinancialKPIs, mockInvoices, mockSubscriptions, mockPlans } from '@/data/billingMockData';
+import { useFinancialKPIs, useInvoices, useSubscriptions, usePlans } from '@/hooks/useBilling';
 import { formatPrice, Invoice } from '@/types/billing';
 import { MetricCardSkeleton, ChartSkeleton, TableSkeleton } from '@/components/ui/skeleton-loader';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -36,38 +37,51 @@ import {
 import { toast } from 'sonner';
 
 export default function FinancialDashboard() {
-  const [isLoading, setIsLoading] = useState(true);
-  const kpis = mockFinancialKPIs;
+  const { kpis, isLoading: kpisLoading, fetchKPIs } = useFinancialKPIs();
+  const { invoices, isLoading: invoicesLoading, fetchInvoices } = useInvoices();
+  const { subscriptions, isLoading: subscriptionsLoading, fetchSubscriptions } = useSubscriptions();
+  const { plans, isLoading: plansLoading, fetchPlans } = usePlans();
 
-  // Simula carregamento
+  const isLoading = kpisLoading || invoicesLoading || subscriptionsLoading || plansLoading;
+
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 800);
-    return () => clearTimeout(timer);
+    fetchKPIs();
+    fetchInvoices({ limit: 5 });
+    fetchSubscriptions();
+    fetchPlans();
   }, []);
+
+  const handleRefresh = () => {
+    fetchKPIs();
+    fetchInvoices({ limit: 5 });
+    fetchSubscriptions();
+    fetchPlans();
+    toast.success('Dados atualizados');
+  };
   
   // Dados para gráfico de MRR
   const mrrData = [
-    { month: 'Ago', mrr: 45000 },
-    { month: 'Set', mrr: 52000 },
-    { month: 'Out', mrr: 58000 },
-    { month: 'Nov', mrr: 62000 },
-    { month: 'Dez', mrr: 68000 },
-    { month: 'Jan', mrr: kpis.mrr },
+    { month: 'Ago', mrr: (kpis?.mrr || 0) * 0.65 },
+    { month: 'Set', mrr: (kpis?.mrr || 0) * 0.75 },
+    { month: 'Out', mrr: (kpis?.mrr || 0) * 0.83 },
+    { month: 'Nov', mrr: (kpis?.mrr || 0) * 0.89 },
+    { month: 'Dez', mrr: (kpis?.mrr || 0) * 0.97 },
+    { month: 'Jan', mrr: kpis?.mrr || 0 },
   ];
 
   // Dados para gráfico de assinaturas por plano
-  const subscriptionsByPlan = mockPlans.map(plan => {
-    const count = mockSubscriptions.filter(s => s.planId === plan.id && s.status !== 'canceled').length;
+  const subscriptionsByPlan = plans.map(plan => {
+    const count = subscriptions.filter(s => s.planId === plan.id && s.status !== 'canceled').length;
     return { name: plan.name, value: count };
   }).filter(item => item.value > 0);
 
   const COLORS = ['#00d4ff', '#00a8cc', '#0088a3', '#006680', '#004455'];
 
   // Faturas recentes
-  const recentInvoices = mockInvoices.slice(0, 5);
+  const recentInvoices = invoices.slice(0, 5);
   
   // Tenants em atraso
-  const overdueSubscriptions = mockSubscriptions.filter(s => s.status === 'past_due');
+  const overdueSubscriptions = subscriptions.filter(s => s.status === 'past_due');
 
   const handleViewInvoice = (invoice: Invoice) => {
     toast.info(`Visualizando fatura ${invoice.invoiceNumber}`);
@@ -129,6 +143,10 @@ export default function FinancialDashboard() {
             <p className="text-muted-foreground">Visão geral das finanças do sistema</p>
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" onClick={handleRefresh}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Atualizar
+            </Button>
             <Button asChild variant="outline">
               <Link to="/billing/invoices">Ver Faturas</Link>
             </Button>
@@ -142,26 +160,26 @@ export default function FinancialDashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <FinancialKPICard
             title="MRR"
-            value={formatPrice(kpis.mrr)}
-            trend={{ value: kpis.mrrGrowth, isPositive: kpis.mrrGrowth >= 0 }}
+            value={formatPrice(kpis?.mrr || 0)}
+            trend={{ value: kpis?.mrrGrowth || 0, isPositive: (kpis?.mrrGrowth || 0) >= 0 }}
             icon={DollarSign}
           />
           <FinancialKPICard
             title="Assinaturas Ativas"
-            value={kpis.activeSubscriptions.toString()}
+            value={(kpis?.activeSubscriptions || 0).toString()}
             icon={Users}
           />
           <FinancialKPICard
             title="Pendente"
-            value={formatPrice(kpis.pendingAmount)}
-            subtitle={`${mockInvoices.filter(i => i.status === 'pending').length} faturas`}
+            value={formatPrice(kpis?.pendingAmount || 0)}
+            subtitle={`${invoices.filter(i => i.status === 'pending').length} faturas`}
             icon={CreditCard}
             variant="warning"
           />
           <FinancialKPICard
             title="Em Atraso"
-            value={formatPrice(kpis.overdueAmount)}
-            subtitle={`${kpis.overdueCount} tenants`}
+            value={formatPrice(kpis?.overdueAmount || 0)}
+            subtitle={`${kpis?.overdueCount || 0} tenants`}
             icon={AlertTriangle}
             variant="error"
           />
@@ -178,13 +196,13 @@ export default function FinancialDashboard() {
                   <CardDescription>Receita recorrente mensal</CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
-                  {kpis.mrrGrowth >= 0 ? (
+                  {(kpis?.mrrGrowth || 0) >= 0 ? (
                     <ArrowUpRight className="h-5 w-5 text-cs-success" />
                   ) : (
                     <ArrowDownRight className="h-5 w-5 text-cs-error" />
                   )}
-                  <span className={kpis.mrrGrowth >= 0 ? 'text-cs-success' : 'text-cs-error'}>
-                    {kpis.mrrGrowth >= 0 ? '+' : ''}{kpis.mrrGrowth}%
+                  <span className={(kpis?.mrrGrowth || 0) >= 0 ? 'text-cs-success' : 'text-cs-error'}>
+                    {(kpis?.mrrGrowth || 0) >= 0 ? '+' : ''}{kpis?.mrrGrowth || 0}%
                   </span>
                 </div>
               </div>
@@ -300,11 +318,11 @@ export default function FinancialDashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle>Faturas Recentes</CardTitle>
-                <CardDescription>Últimas faturas geradas</CardDescription>
+                <CardDescription>Últimas faturas emitidas</CardDescription>
               </div>
-              <Button asChild variant="outline">
-                <Link to="/billing/invoices" className="flex items-center gap-1">
-                  Ver Todas <ChevronRight className="h-4 w-4" />
+              <Button asChild variant="ghost" className="text-cs-cyan">
+                <Link to="/billing/invoices">
+                  Ver todas <ChevronRight className="h-4 w-4 ml-1" />
                 </Link>
               </Button>
             </div>
@@ -319,38 +337,6 @@ export default function FinancialDashboard() {
             />
           </CardContent>
         </Card>
-
-        {/* Links Rápidos */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Link 
-            to="/billing/plans"
-            className="flex items-center justify-between p-4 bg-cs-bg-card border border-border rounded-lg hover:border-primary/50 transition-colors"
-          >
-            <span className="font-medium">Gerenciar Planos</span>
-            <ChevronRight className="h-5 w-5 text-muted-foreground" />
-          </Link>
-          <Link 
-            to="/billing/modules"
-            className="flex items-center justify-between p-4 bg-cs-bg-card border border-border rounded-lg hover:border-primary/50 transition-colors"
-          >
-            <span className="font-medium">Gerenciar Módulos</span>
-            <ChevronRight className="h-5 w-5 text-muted-foreground" />
-          </Link>
-          <Link 
-            to="/billing/coupons"
-            className="flex items-center justify-between p-4 bg-cs-bg-card border border-border rounded-lg hover:border-primary/50 transition-colors"
-          >
-            <span className="font-medium">Cupons de Desconto</span>
-            <ChevronRight className="h-5 w-5 text-muted-foreground" />
-          </Link>
-          <Link 
-            to="/billing/reports"
-            className="flex items-center justify-between p-4 bg-cs-bg-card border border-border rounded-lg hover:border-primary/50 transition-colors"
-          >
-            <span className="font-medium">Relatórios Financeiros</span>
-            <ChevronRight className="h-5 w-5 text-muted-foreground" />
-          </Link>
-        </div>
       </div>
     </DashboardLayout>
   );

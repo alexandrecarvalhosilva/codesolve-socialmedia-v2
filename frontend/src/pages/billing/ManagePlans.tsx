@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { DashboardLayout } from '@/layouts/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
@@ -17,25 +18,55 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Plus, Edit, Trash2, Eye, EyeOff, Star, Package, Check, X } from 'lucide-react';
-import { mockPlans } from '@/data/billingMockData';
+import { Plus, Edit, Trash2, Eye, EyeOff, Star, Package, Check, X, RefreshCw } from 'lucide-react';
+import { usePlans, useCreatePlan, useUpdatePlan, useDeletePlan } from '@/hooks/useBilling';
 import { BillingPlan, formatPrice } from '@/types/billing';
 import { MODULE_CATALOG, getModulesGroupedByCategory } from '@/config/moduleCatalog';
 import { getCategoryLabel, formatModulePrice } from '@/types/modules';
 import { toast } from 'sonner';
 
 export default function ManagePlans() {
-  const [plans, setPlans] = useState(mockPlans);
+  const { plans, isLoading, error, fetchPlans } = usePlans();
+  const { createPlan, isCreating } = useCreatePlan();
+  const { updatePlan, isUpdating } = useUpdatePlan();
+  const { deletePlan, isDeleting } = useDeletePlan();
+  
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<BillingPlan | null>(null);
   const [selectedModules, setSelectedModules] = useState<string[]>([]);
   const [activeDialogTab, setActiveDialogTab] = useState('details');
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    basePrice: 0,
+    maxUsers: 5,
+    maxInstances: 1,
+    maxMessagesPerMonth: 1000,
+    isActive: true,
+    isPublic: true,
+    isPopular: false,
+  });
+
+  useEffect(() => {
+    fetchPlans();
+  }, []);
 
   const groupedModules = getModulesGroupedByCategory();
 
   const handleCreatePlan = () => {
     setEditingPlan(null);
     setSelectedModules([]);
+    setFormData({
+      name: '',
+      description: '',
+      basePrice: 0,
+      maxUsers: 5,
+      maxInstances: 1,
+      maxMessagesPerMonth: 1000,
+      isActive: true,
+      isPublic: true,
+      isPopular: false,
+    });
     setActiveDialogTab('details');
     setIsDialogOpen(true);
   };
@@ -43,27 +74,51 @@ export default function ManagePlans() {
   const handleEditPlan = (plan: BillingPlan) => {
     setEditingPlan(plan);
     setSelectedModules(plan.modules || []);
+    setFormData({
+      name: plan.name,
+      description: plan.description || '',
+      basePrice: plan.basePrice,
+      maxUsers: plan.maxUsers,
+      maxInstances: plan.maxInstances,
+      maxMessagesPerMonth: plan.maxMessagesPerMonth || 0,
+      isActive: plan.isActive,
+      isPublic: plan.isPublic,
+      isPopular: plan.isPopular || false,
+    });
     setActiveDialogTab('details');
     setIsDialogOpen(true);
   };
 
-  const handleToggleActive = (planId: string) => {
-    setPlans(plans.map(p => 
-      p.id === planId ? { ...p, isActive: !p.isActive } : p
-    ));
-    toast.success('Status do plano atualizado');
+  const handleToggleActive = async (plan: BillingPlan) => {
+    try {
+      await updatePlan(plan.id, { isActive: !plan.isActive });
+      toast.success('Status do plano atualizado');
+      fetchPlans();
+    } catch (err) {
+      toast.error('Erro ao atualizar status do plano');
+    }
   };
 
-  const handleTogglePublic = (planId: string) => {
-    setPlans(plans.map(p => 
-      p.id === planId ? { ...p, isPublic: !p.isPublic } : p
-    ));
-    toast.success('Visibilidade do plano atualizada');
+  const handleTogglePublic = async (plan: BillingPlan) => {
+    try {
+      await updatePlan(plan.id, { isPublic: !plan.isPublic });
+      toast.success('Visibilidade do plano atualizada');
+      fetchPlans();
+    } catch (err) {
+      toast.error('Erro ao atualizar visibilidade do plano');
+    }
   };
 
-  const handleDeletePlan = (planId: string) => {
-    setPlans(plans.filter(p => p.id !== planId));
-    toast.success('Plano excluído');
+  const handleDeletePlan = async (planId: string) => {
+    if (!confirm('Tem certeza que deseja excluir este plano?')) return;
+    
+    try {
+      await deletePlan(planId);
+      toast.success('Plano excluído');
+      fetchPlans();
+    } catch (err) {
+      toast.error('Erro ao excluir plano');
+    }
   };
 
   const handleToggleModule = (moduleId: string) => {
@@ -86,16 +141,26 @@ export default function ManagePlans() {
     }
   };
 
-  const handleSavePlan = () => {
-    if (editingPlan) {
-      setPlans(plans.map(p => 
-        p.id === editingPlan.id 
-          ? { ...p, modules: selectedModules }
-          : p
-      ));
+  const handleSavePlan = async () => {
+    try {
+      const planData = {
+        ...formData,
+        modules: selectedModules,
+      };
+      
+      if (editingPlan) {
+        await updatePlan(editingPlan.id, planData);
+        toast.success('Plano atualizado!');
+      } else {
+        await createPlan(planData);
+        toast.success('Plano criado!');
+      }
+      
+      setIsDialogOpen(false);
+      fetchPlans();
+    } catch (err) {
+      toast.error(editingPlan ? 'Erro ao atualizar plano' : 'Erro ao criar plano');
     }
-    toast.success(editingPlan ? 'Plano atualizado!' : 'Plano criado!');
-    setIsDialogOpen(false);
   };
 
   const getModuleCountByPlan = (planModules: string[]) => {
@@ -103,6 +168,36 @@ export default function ManagePlans() {
     const total = MODULE_CATALOG.filter(m => !m.isCore).length;
     return `${included}/${total}`;
   };
+
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="p-6 space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <Skeleton className="h-8 w-48 mb-2" />
+              <Skeleton className="h-4 w-64" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Card key={i} className="bg-cs-bg-card border-border">
+                <CardHeader>
+                  <Skeleton className="h-6 w-32 mb-2" />
+                  <Skeleton className="h-4 w-48" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-12 w-full mb-4" />
+                  <Skeleton className="h-4 w-full mb-2" />
+                  <Skeleton className="h-4 w-3/4" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -113,10 +208,16 @@ export default function ManagePlans() {
             <h1 className="text-2xl font-bold text-foreground">Gerenciar Planos</h1>
             <p className="text-muted-foreground">Configure os planos de assinatura e seus módulos inclusos</p>
           </div>
-          <Button onClick={handleCreatePlan} className="bg-cs-cyan hover:bg-cs-cyan/90">
-            <Plus className="h-4 w-4 mr-2" />
-            Novo Plano
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => fetchPlans()}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Atualizar
+            </Button>
+            <Button onClick={handleCreatePlan} className="bg-cs-cyan hover:bg-cs-cyan/90">
+              <Plus className="h-4 w-4 mr-2" />
+              Novo Plano
+            </Button>
+          </div>
         </div>
 
         {/* Grid de Planos */}
@@ -144,7 +245,7 @@ export default function ManagePlans() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleTogglePublic(plan.id)}
+                      onClick={() => handleTogglePublic(plan)}
                       title={plan.isPublic ? 'Tornar privado' : 'Tornar público'}
                     >
                       {plan.isPublic ? (
@@ -227,7 +328,7 @@ export default function ManagePlans() {
                   <div className="flex items-center gap-2">
                     <Switch
                       checked={plan.isActive}
-                      onCheckedChange={() => handleToggleActive(plan.id)}
+                      onCheckedChange={() => handleToggleActive(plan)}
                     />
                     <span className="text-sm text-muted-foreground">
                       {plan.isActive ? 'Ativo' : 'Inativo'}
@@ -246,6 +347,7 @@ export default function ManagePlans() {
                       size="icon"
                       onClick={() => handleDeletePlan(plan.id)}
                       className="text-cs-error hover:text-cs-error"
+                      disabled={isDeleting}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -268,79 +370,95 @@ export default function ManagePlans() {
               </DialogDescription>
             </DialogHeader>
 
-            <Tabs value={activeDialogTab} onValueChange={setActiveDialogTab} className="w-full">
+            <Tabs value={activeDialogTab} onValueChange={setActiveDialogTab}>
               <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="details">Detalhes do Plano</TabsTrigger>
-                <TabsTrigger value="modules" className="flex items-center gap-2">
-                  <Package className="h-4 w-4" />
-                  Módulos Inclusos
-                  <Badge className="bg-cs-cyan/10 text-cs-cyan text-xs ml-1">
-                    {selectedModules.length}
-                  </Badge>
-                </TabsTrigger>
+                <TabsTrigger value="details">Detalhes</TabsTrigger>
+                <TabsTrigger value="modules">Módulos</TabsTrigger>
               </TabsList>
-              
-              <TabsContent value="details" className="mt-4">
-                <div className="grid grid-cols-2 gap-4 py-4">
+
+              <TabsContent value="details" className="space-y-4 mt-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Nome</Label>
-                    <Input 
-                      defaultValue={editingPlan?.name}
-                      placeholder="Ex: Professional"
+                    <Label>Nome do Plano</Label>
+                    <Input
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      placeholder="Ex: Starter"
                       className="bg-cs-bg-primary border-border"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Slug</Label>
-                    <Input 
-                      defaultValue={editingPlan?.slug}
-                      placeholder="Ex: professional"
-                      className="bg-cs-bg-primary border-border"
-                    />
-                  </div>
-                  <div className="col-span-2 space-y-2">
-                    <Label>Descrição</Label>
-                    <Input 
-                      defaultValue={editingPlan?.description}
-                      placeholder="Descrição do plano"
-                      className="bg-cs-bg-primary border-border"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Preço Base (centavos)</Label>
-                    <Input 
+                    <Label>Preço Base (R$)</Label>
+                    <Input
                       type="number"
-                      defaultValue={editingPlan?.basePrice}
-                      placeholder="9700"
+                      value={formData.basePrice}
+                      onChange={(e) => setFormData({ ...formData, basePrice: Number(e.target.value) })}
                       className="bg-cs-bg-primary border-border"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Mensagens/Mês</Label>
-                    <Input 
-                      type="number"
-                      defaultValue={editingPlan?.maxMessagesPerMonth || ''}
-                      placeholder="Vazio = ilimitado"
-                      className="bg-cs-bg-primary border-border"
-                    />
-                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Descrição</Label>
+                  <Input
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    placeholder="Descrição do plano"
+                    className="bg-cs-bg-primary border-border"
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label>Máx. Usuários</Label>
-                    <Input 
+                    <Input
                       type="number"
-                      defaultValue={editingPlan?.maxUsers}
-                      placeholder="5"
+                      value={formData.maxUsers}
+                      onChange={(e) => setFormData({ ...formData, maxUsers: Number(e.target.value) })}
                       className="bg-cs-bg-primary border-border"
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>Máx. Instâncias</Label>
-                    <Input 
+                    <Input
                       type="number"
-                      defaultValue={editingPlan?.maxInstances}
-                      placeholder="2"
+                      value={formData.maxInstances}
+                      onChange={(e) => setFormData({ ...formData, maxInstances: Number(e.target.value) })}
                       className="bg-cs-bg-primary border-border"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Mensagens/mês</Label>
+                    <Input
+                      type="number"
+                      value={formData.maxMessagesPerMonth}
+                      onChange={(e) => setFormData({ ...formData, maxMessagesPerMonth: Number(e.target.value) })}
+                      className="bg-cs-bg-primary border-border"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-6 pt-4">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={formData.isActive}
+                      onCheckedChange={(checked) => setFormData({ ...formData, isActive: checked })}
+                    />
+                    <Label>Ativo</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={formData.isPublic}
+                      onCheckedChange={(checked) => setFormData({ ...formData, isPublic: checked })}
+                    />
+                    <Label>Público</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={formData.isPopular}
+                      onCheckedChange={(checked) => setFormData({ ...formData, isPopular: checked })}
+                    />
+                    <Label>Popular</Label>
                   </div>
                 </div>
               </TabsContent>
@@ -348,97 +466,64 @@ export default function ManagePlans() {
               <TabsContent value="modules" className="mt-4">
                 <ScrollArea className="h-[400px] pr-4">
                   <div className="space-y-6">
-                    {Object.entries(groupedModules).map(([category, modules]) => {
-                      if (modules.length === 0) return null;
-                      
-                      const categoryIds = modules.map(m => m.id);
-                      const selectedCount = categoryIds.filter(id => selectedModules.includes(id)).length;
-                      const allSelected = selectedCount === categoryIds.length;
-                      
-                      return (
-                        <div key={category} className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <h4 className="font-semibold text-cs-text-primary flex items-center gap-2">
-                              {getCategoryLabel(category as any)}
-                              <Badge variant="outline" className="text-xs">
-                                {selectedCount}/{modules.length}
-                              </Badge>
-                            </h4>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleSelectAllInCategory(category)}
-                              className="text-xs"
-                            >
-                              {allSelected ? (
-                                <>
-                                  <X className="h-3 w-3 mr-1" />
-                                  Desmarcar todos
-                                </>
-                              ) : (
-                                <>
-                                  <Check className="h-3 w-3 mr-1" />
-                                  Selecionar todos
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-2">
-                            {modules.map(module => {
-                              const isSelected = selectedModules.includes(module.id);
-                              const ModuleIcon = module.icon;
-                              
-                              return (
-                                <div
-                                  key={module.id}
-                                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${
-                                    isSelected 
-                                      ? 'border-cs-cyan bg-cs-cyan/5' 
-                                      : 'border-border bg-cs-bg-primary/50 hover:border-cs-cyan/50'
-                                  } ${module.isCore ? 'opacity-60' : ''}`}
-                                  onClick={() => !module.isCore && handleToggleModule(module.id)}
-                                >
-                                  <Checkbox 
-                                    checked={isSelected || module.isCore}
-                                    disabled={module.isCore}
-                                    onCheckedChange={() => handleToggleModule(module.id)}
-                                  />
-                                  <div className="p-1.5 rounded bg-cs-bg-card">
-                                    <ModuleIcon className="h-4 w-4 text-cs-cyan" />
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-cs-text-primary flex items-center gap-1">
-                                      {module.name}
-                                      {module.isCore && (
-                                        <Badge variant="outline" className="text-[10px] py-0">Core</Badge>
-                                      )}
-                                    </p>
-                                    <p className="text-xs text-cs-text-muted line-clamp-1">
-                                      {module.pricing && module.pricing.monthlyPrice > 0 
-                                        ? `Valor: ${formatModulePrice(module.pricing.monthlyPrice)}/mês`
-                                        : 'Sem custo adicional'
-                                      }
-                                    </p>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
+                    {Object.entries(groupedModules).map(([category, modules]) => (
+                      <div key={category} className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-medium text-foreground">
+                            {getCategoryLabel(category)}
+                          </h4>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleSelectAllInCategory(category)}
+                            className="text-xs"
+                          >
+                            Selecionar Todos
+                          </Button>
                         </div>
-                      );
-                    })}
+                        <div className="grid grid-cols-2 gap-2">
+                          {modules.map((module) => (
+                            <div
+                              key={module.id}
+                              className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                                selectedModules.includes(module.id)
+                                  ? 'border-cs-cyan bg-cs-cyan/10'
+                                  : 'border-border hover:border-muted-foreground'
+                              }`}
+                              onClick={() => handleToggleModule(module.id)}
+                            >
+                              <Checkbox
+                                checked={selectedModules.includes(module.id)}
+                                onCheckedChange={() => handleToggleModule(module.id)}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium text-foreground truncate">
+                                  {module.name}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {formatModulePrice(module.price)}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </ScrollArea>
               </TabsContent>
             </Tabs>
 
-            <DialogFooter className="mt-4">
+            <DialogFooter>
               <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                 Cancelar
               </Button>
-              <Button onClick={handleSavePlan} className="bg-cs-cyan hover:bg-cs-cyan/90">
-                {editingPlan ? 'Salvar Alterações' : 'Criar Plano'}
+              <Button 
+                onClick={handleSavePlan} 
+                className="bg-cs-cyan hover:bg-cs-cyan/90"
+                disabled={isCreating || isUpdating}
+              >
+                {isCreating || isUpdating ? 'Salvando...' : 'Salvar'}
               </Button>
             </DialogFooter>
           </DialogContent>

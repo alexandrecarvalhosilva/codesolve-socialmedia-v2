@@ -1,32 +1,47 @@
+import { useState, useEffect } from 'react';
 import { TenantLayout } from '@/layouts/TenantLayout';
 import { Header } from '@/components/dashboard/Header';
 import { TenantDashboardTab } from '@/components/tenant/TenantDashboardTab';
 import { BillingSummaryCard } from '@/components/billing/BillingSummaryCard';
 import { TrialBanner } from '@/components/dashboard/TrialBanner';
 import { OnboardingTour, useOnboarding } from '@/components/onboarding/OnboardingTour';
-import { Bot, Zap, Clock, TrendingUp, MessageSquare, Calendar, Settings } from 'lucide-react';
+import { Bot, Zap, Clock, TrendingUp, MessageSquare, Calendar, Settings, Loader2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
+import { useDashboardMetrics, useIntegrationStatus } from '@/hooks/useDashboard';
 
-// AI Performance mock data
-const aiPerformance = {
-  autoResponseRate: 78,
-  timeSaved: '8.5h',
-  moneySaved: 'R$ 2.550',
-  escalationRate: 2
-};
 
-// Integration status
-const integrations = [
-  { name: 'WhatsApp', status: 'connected', detail: '3/3 ativos', color: 'bg-cs-success' },
-  { name: 'MCP', status: 'connected', detail: '1.250 docs', color: 'bg-cs-cyan' },
-  { name: 'RAG', status: 'connected', detail: '450 FAQs', color: 'bg-cs-cyan' },
-  { name: 'OpenAI', status: 'warning', detail: '45% tokens', color: 'bg-cs-warning' }
-];
 
 export default function TenantDashboard() {
   const { shouldShowOnboarding, completeOnboarding } = useOnboarding();
+  const { metrics, isLoading: metricsLoading, fetchMetrics } = useDashboardMetrics();
+  const { integrations, isLoading: integrationsLoading, fetchIntegrationStatus } = useIntegrationStatus();
+
+  useEffect(() => {
+    fetchMetrics();
+    fetchIntegrationStatus();
+  }, []);
+
+  // AI Performance from metrics or defaults
+  const aiPerformance = {
+    autoResponseRate: metrics?.aiResponseRate || 0,
+    timeSaved: metrics?.timeSaved ? `${metrics.timeSaved}h` : '0h',
+    moneySaved: metrics?.moneySaved ? `R$ ${metrics.moneySaved.toLocaleString('pt-BR')}` : 'R$ 0',
+    escalationRate: metrics?.escalationRate || 0
+  };
+
+  // Map integrations to display format
+  const integrationsList = integrations.length > 0 ? integrations.map(i => ({
+    name: i.name,
+    status: i.status,
+    detail: i.detail,
+    color: i.status === 'connected' ? 'bg-cs-success' : i.status === 'warning' ? 'bg-cs-warning' : 'bg-cs-error'
+  })) : [
+    { name: 'WhatsApp', status: 'disconnected', detail: 'Não configurado', color: 'bg-cs-text-muted' },
+    { name: 'OpenAI', status: 'disconnected', detail: 'Não configurado', color: 'bg-cs-text-muted' }
+  ];
 
   const handleOnboardingComplete = () => {
     completeOnboarding();
@@ -121,7 +136,7 @@ export default function TenantDashboard() {
             </div>
             
             <div className="space-y-2 mb-4">
-              {integrations.map((integration) => (
+              {integrationsList.map((integration) => (
                 <div key={integration.name} className="flex items-center justify-between p-2 rounded-lg bg-cs-bg-primary/50">
                   <div className="flex items-center gap-2">
                     <span className={`w-2 h-2 rounded-full ${integration.color}`} />
